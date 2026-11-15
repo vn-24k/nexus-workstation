@@ -62,10 +62,10 @@ interface RecordNote {
 }
 
 const STORAGE_KEYS = {
-  AUTH: "nexus_apple_auth",
-  VOICE_ANCHORS: "nexus_voice_anchors_v1",
-  MESSAGES: "nexus_apple_chat_v1",
-  RECORDS: "nexus_apple_records_v1",
+  AUTH: "vntts_auth",
+  VOICE_ANCHORS: "vntts_voice_anchors_v1",
+  MESSAGES: "vntts_chat_v1",
+  RECORDS: "vntts_records_v1",
 };
 
 // Preset Contacts
@@ -76,7 +76,7 @@ const PRESET_CONTACTS = [
   { id: "outro", name: "Outro", phone: "", label: "Outro Número", icon: "📱" },
 ];
 
-export default function StudioNexus() {
+export default function VnTtsStudio() {
   // Auth
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [loginUser, setLoginUser] = useState("");
@@ -161,7 +161,7 @@ export default function StudioNexus() {
 
   // Load from LocalStorage & Check WhatsApp Bridge
   useEffect(() => {
-    const authSaved = localStorage.getItem(STORAGE_KEYS.AUTH);
+    const authSaved = localStorage.getItem(STORAGE_KEYS.AUTH) || localStorage.getItem("nexus_apple_auth");
     setIsAuthenticated(authSaved === "true");
 
     fetch("/api/whatsapp/status")
@@ -169,7 +169,7 @@ export default function StudioNexus() {
       .then((data) => setBridgeConnected(data.ok && data.connected))
       .catch(() => setBridgeConnected(false));
 
-    const chatSaved = localStorage.getItem(STORAGE_KEYS.MESSAGES);
+    const chatSaved = localStorage.getItem(STORAGE_KEYS.MESSAGES) || localStorage.getItem("nexus_apple_chat_v1");
     if (chatSaved) {
       try {
         setMessages(JSON.parse(chatSaved));
@@ -180,7 +180,7 @@ export default function StudioNexus() {
       setMessages(getDefaultMessages());
     }
 
-    const voiceSaved = localStorage.getItem(STORAGE_KEYS.VOICE_ANCHORS);
+    const voiceSaved = localStorage.getItem(STORAGE_KEYS.VOICE_ANCHORS) || localStorage.getItem("nexus_voice_anchors_v1");
     if (voiceSaved) {
       try {
         setVoiceAnchors(JSON.parse(voiceSaved));
@@ -189,7 +189,7 @@ export default function StudioNexus() {
       }
     }
 
-    const recsSaved = localStorage.getItem(STORAGE_KEYS.RECORDS);
+    const recsSaved = localStorage.getItem(STORAGE_KEYS.RECORDS) || localStorage.getItem("nexus_apple_records_v1");
     if (recsSaved) {
       try {
         setRecords(JSON.parse(recsSaved));
@@ -204,7 +204,7 @@ export default function StudioNexus() {
       {
         id: "msg_intro",
         role: "assistant",
-        content: "Studio Nexus ativo. Sistema calibrado para síntese de voz nativa, raciocínio e disparo direto. Como posso ajudar?",
+        content: "VN TTS ativo. Sistema calibrado para síntese de voz nativa, raciocínio e disparo direto no WhatsApp. Como posso ajudar?",
         createdAt: new Date().toISOString(),
       },
     ];
@@ -808,7 +808,7 @@ export default function StudioNexus() {
               <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-white/10 flex items-center justify-center mx-auto mb-4 text-white font-semibold text-sm tracking-tight shadow-lg">
                 VN
               </div>
-              <h1 className="text-lg font-semibold tracking-tight text-white">Studio Nexus</h1>
+              <h1 className="text-lg font-semibold tracking-tight text-white">VN TTS</h1>
               <p className="text-xs text-zinc-500 mt-1">Autenticação do Estúdio</p>
             </div>
 
@@ -876,7 +876,7 @@ export default function StudioNexus() {
             <span className="w-8 h-8 rounded-xl bg-zinc-900 border border-white/10 flex items-center justify-center text-xs font-semibold text-white">
               VN
             </span>
-            <span className="text-xs font-medium tracking-tight text-white">Studio Nexus</span>
+            <span className="text-xs font-medium tracking-tight text-white">VN TTS</span>
           </div>
 
           {/* Segmented Control Pill with 4 Tabs */}

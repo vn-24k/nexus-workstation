@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Nexus Workstation — Central Operacional de Dados & Bot",
-  description: "Plataforma profissional de processamento de dados, orquestração de bot, APIs e sincronização em nuvem.",
+  title: "VN TTS — Estúdio Vocal Autoral & Transmissão WhatsApp",
+  description: "Estúdio vocal proprietário com clonagem de voz, análise acústica emocional, gravação e transmissão direta no WhatsApp.",
   authors: [{ name: "vn-24k" }],
 };
 

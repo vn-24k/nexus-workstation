@@ -1,46 +1,34 @@
-# Nexus Workstation
+# VN TTS — Estúdio Vocal & Transmissão Autoral
 
-Central proprietária de processamento de dados, orquestração de bot, APIs REST e sincronização contínua com cofre de nuvem.
+Central proprietária de síntese de voz de alta fidelidade, análise acústica emocional em tempo real e transmissão direta de notas de voz nativas no WhatsApp.
 
-Desenvolvido e mantido por **Studio VN (vn-24k)**.
+Desenvolvido e mantido por **Studio VN (`vn-24k`)**.
 
----
-
-## ⚡ Visão Geral da Arquitetura
-
-O **Nexus Workstation** unifica quatro pilares essenciais de computação e gestão de dados em uma única interface moderna e responsiva:
-
-1. **OmniBot Interativo:** Terminal de comandos e assistente operacional integrado ao banco de dados relacional. Suporta comandos `/status`, `/db`, `/add`, `/sync`, `/ocr` e processamento de instruções diretas.
-2. **Banco de Dados Relacional:** Central de registros de áudio, documentos, transações financeiras e metadados de sistema com busca em tempo real, filtros por categoria e gestão de ciclo de vida.
-3. **API REST Completa:** Endpoints dedicados para integração externa (`/api/bot`, `/api/records`, `/api/system/status`, `/api/vault/sync`).
-4. **Cloud Vault Sync:** Monitoramento e sincronização com cofre privado de alta capacidade (`vns24k/vault-backup`) com hash de integridade SHA-256.
+🌐 **URL Oficial:** [https://vn-tts.vercel.app](https://vn-tts.vercel.app)  
+📦 **Repositório:** [https://github.com/vn-24k/vn-tts](https://github.com/vn-24k/vn-tts)
 
 ---
 
-## 🛠️ Tecnologias Utilizadas
+## ⚡ Módulos do Sistema
 
-* **Framework:** Next.js (App Router)
-* **Linguagem:** TypeScript
-* **Interface & Estilo:** Tailwind CSS & Lucide Icons
-* **Banco de Dados:** Engine Relacional de Alta Concorrência (In-Memory + Persistência)
-* **Deploy:** Vercel (Produção Edge) & Hugging Face (Cloud Vault)
+O **VN TTS** unifica os seguintes recursos em uma interface refinada no padrão Apple Glass:
 
----
-
-## 🚀 Como Executar Localmente
-
-```bash
-# Instalar dependências
-npm install
-
-# Iniciar servidor de desenvolvimento
-npm run dev
-
-# Compilar para produção
-npm run build
-npm start
-```
+1. **🎙️ Disparo Vocal:** Síntese de fala ultrarrealista com a voz autoral `minha-voz`, equalização acústica de estúdio e disparo direto no WhatsApp (`+55 11 99568-5756`) como áudio nativo gravado na hora (PTT com forma de onda e microfone verde).
+2. **🧬 Laboratório Vocal (Voz Real):** Captura ao vivo pelo microfone do navegador, telemetria acústica e diagnóstico automático de tom emocional (*Bravo / Firme*, *Calmo / Afeto*, *Engraçado / Resenha*, *Empolgado / Correria*) para calibrar âncoras vocais.
+3. **🤖 Assistente Conversacional:** Interface conversacional com raciocínio contextual e reprodução vocal instantânea de respostas na voz do titular.
+4. **💾 Acervo & Repositório Sonoro:** Biblioteca de áudios salvos com persistência local, player de reprodução integrado, download em `.mp3` e atalho de reenvio direto no WhatsApp sem necessidade de reprocessamento.
 
 ---
 
-© 2026 Studio VN (vn-24k). Todos os direitos reservados.
+## 🛠️ Tecnologias
+
+- **Framework:** Next.js (App Router)
+- **Linguagem:** TypeScript
+- **Interface & Estilo:** Tailwind CSS & Lucide Icons
+- **Síntese Vocal:** Motor Acústico Fish Audio (`s2.1-pro-free`, `minha-voz`)
+- **Ponte WhatsApp:** WhatsApp Bridge PTT (`libopus`, `audio/ogg`, Baileys)
+- **Deploy:** Vercel Edge Global & Cloudflare QUIC Tunnel
+
+---
+
+© 2026 Studio VN (`vn-24k`). Todos os direitos reservados.
