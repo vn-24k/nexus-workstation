@@ -2,199 +2,235 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import {
-  Bot,
-  Database,
-  Cloud,
-  Code2,
+  Mic,
+  Play,
+  Pause,
+  Upload,
   Send,
-  RefreshCw,
-  Plus,
   Trash2,
-  CheckCircle2,
-  Clock,
-  Search,
-  Terminal,
-  Activity,
-  Layers,
-  ShieldCheck,
-  ExternalLink,
-  ChevronRight,
-  HardDrive,
-  Copy,
-  Check,
-  Volume2,
   BookmarkPlus,
+  Check,
+  Search,
+  Plus,
+  LogOut,
   Sparkles,
   Lock,
   User,
-  LogOut,
-  AlertCircle,
-  KeyRound,
+  Volume2,
+  RefreshCw,
+  FolderOpen,
+  MessageSquare,
+  Radio,
 } from "lucide-react";
 
-interface RecordItem {
+interface VoiceAnchor {
+  id: string;
+  name: string;
+  mood: "firme" | "empolgado" | "calmo" | "descontraido";
+  accent: "sp" | "carioca" | "baiano" | "neutro";
+  audioUrl: string;
+  duration?: string;
+  createdAt: string;
+}
+
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
+interface RecordNote {
   id: string;
   title: string;
-  category: "audio" | "documento" | "sistema" | "financeiro" | "pesquisa";
   content: string;
-  status: "processado" | "pendente" | "arquivado" | "em_analise";
-  metadata: Record<string, any>;
-  createdAt: string;
-}
-
-interface BotMessage {
-  id: string;
-  role: "user" | "bot";
-  content: string;
-  command?: string;
-  data?: any;
-  createdAt: string;
-}
-
-interface SyncEvent {
-  id: string;
-  snapshotName: string;
-  hash: string;
-  status: "sincronizado" | "pendente" | "falha";
-  fileCount: number;
-  totalSizeMb: number;
+  category: "voz" | "ideia" | "documento" | "pesquisa";
   createdAt: string;
 }
 
 const STORAGE_KEYS = {
-  AUTH: "nexus_auth_session",
-  MESSAGES: "nexus_chat_history_v2",
-  RECORDS: "nexus_records_store_v2",
+  AUTH: "nexus_apple_auth",
+  VOICE_ANCHORS: "nexus_voice_anchors_v1",
+  MESSAGES: "nexus_apple_chat_v1",
+  RECORDS: "nexus_apple_records_v1",
 };
 
-export default function NexusDashboard() {
-  // Authentication State
+// Default high-grade voice reference samples
+const initialVoiceAnchors: VoiceAnchor[] = [
+  {
+    id: "anchor_01",
+    name: "Tom Firme & Decisão",
+    mood: "firme",
+    accent: "sp",
+    audioUrl: "",
+    duration: "0:06",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: "anchor_02",
+    name: "Energia & Entusiasmo",
+    mood: "empolgado",
+    accent: "sp",
+    audioUrl: "",
+    duration: "0:05",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: "anchor_03",
+    name: "Cadência Descontraída",
+    mood: "descontraido",
+    accent: "carioca",
+    audioUrl: "",
+    duration: "0:07",
+    createdAt: new Date().toISOString(),
+  },
+];
+
+const initialRecords: RecordNote[] = [
+  {
+    id: "rec_01",
+    title: "Diretrizes de Identidade Vocal",
+    content: "Articulação firme em negociações e cadência solta em momentos de descontração. Preservar respiração natural.",
+    category: "voz",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: "rec_02",
+    title: "Planejamento Estratégico 2026",
+    content: "Estruturação de novos ativos digitais com interfaces de alta fidelidade e automação contínua.",
+    category: "ideia",
+    createdAt: new Date().toISOString(),
+  },
+];
+
+export default function StudioNexus() {
+  // Auth
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [loginUser, setLoginUser] = useState("");
   const [loginPass, setLoginPass] = useState("");
   const [loginError, setLoginError] = useState("");
-  const [loginLoading, setLoginLoading] = useState(false);
 
-  // Tab State
-  const [activeTab, setActiveTab] = useState<"bot" | "database" | "api" | "vault">("bot");
+  // Navigation
+  const [currentTab, setCurrentTab] = useState<"assistant" | "voice" | "records">("assistant");
 
-  // Bot State
-  const [messages, setMessages] = useState<BotMessage[]>([]);
-  const [inputMessage, setInputMessage] = useState("");
-  const [botLoading, setBotLoading] = useState(false);
-  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
-  const [audioLoadingId, setAudioLoadingId] = useState<string | null>(null);
+  // Chat
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [prompt, setPrompt] = useState("");
+  const [isReplying, setIsReplying] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Database State
-  const [records, setRecords] = useState<RecordItem[]>([]);
-  const [recordsLoading, setRecordsLoading] = useState(false);
+  // Audio Playback
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Voice Lab
+  const [voiceAnchors, setVoiceAnchors] = useState<VoiceAnchor[]>([]);
+  const [selectedAnchorId, setSelectedAnchorId] = useState<string | null>(null);
+  const [uploadName, setUploadName] = useState("");
+  const [uploadMood, setUploadMood] = useState<VoiceAnchor["mood"]>("firme");
+  const [uploadAccent, setUploadAccent] = useState<VoiceAnchor["accent"]>("sp");
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Records / Acervo
+  const [records, setRecords] = useState<RecordNote[]>([]);
+  const [searchFilter, setSearchFilter] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("todos");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newContent, setNewContent] = useState("");
-  const [newCategory, setNewCategory] = useState<RecordItem["category"]>("sistema");
-
-  // Sync / Vault State
-  const [syncEvents, setSyncEvents] = useState<SyncEvent[]>([]);
-  const [syncing, setSyncing] = useState(false);
-
-  // API Explorer State
-  const [apiResponse, setApiResponse] = useState<any>(null);
-  const [apiLatency, setApiLatency] = useState<number | null>(null);
-  const [testingEndpoint, setTestingEndpoint] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [isNewNoteOpen, setIsNewNoteOpen] = useState(false);
+  const [newNoteTitle, setNewNoteTitle] = useState("");
+  const [newNoteContent, setNewNoteContent] = useState("");
   const [savedSuccessId, setSavedSuccessId] = useState<string | null>(null);
 
-  // Check Auth & LocalStorage on Mount
+  // Load from LocalStorage
   useEffect(() => {
-    // 1. Auth check
-    const savedAuth = localStorage.getItem(STORAGE_KEYS.AUTH);
-    if (savedAuth === "true") {
-      setIsAuthenticated(true);
-    } else {
-      setIsAuthenticated(false);
-    }
+    // Auth
+    const authSaved = localStorage.getItem(STORAGE_KEYS.AUTH);
+    setIsAuthenticated(authSaved === "true");
 
-    // 2. Chat history from localStorage
-    const savedChat = localStorage.getItem(STORAGE_KEYS.MESSAGES);
-    if (savedChat) {
+    // Chat
+    const chatSaved = localStorage.getItem(STORAGE_KEYS.MESSAGES);
+    if (chatSaved) {
       try {
-        const parsed = JSON.parse(savedChat);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(parsed);
-        } else {
-          fetchInitialMessages();
-        }
+        setMessages(JSON.parse(chatSaved));
       } catch (e) {
-        fetchInitialMessages();
+        setMessages(getDefaultMessages());
       }
     } else {
-      fetchInitialMessages();
+      setMessages(getDefaultMessages());
     }
 
-    // 3. Records from localStorage
-    const savedRecs = localStorage.getItem(STORAGE_KEYS.RECORDS);
-    if (savedRecs) {
+    // Voice Anchors
+    const voiceSaved = localStorage.getItem(STORAGE_KEYS.VOICE_ANCHORS);
+    if (voiceSaved) {
       try {
-        const parsed = JSON.parse(savedRecs);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setRecords(parsed);
-        } else {
-          fetchRecords();
-        }
+        setVoiceAnchors(JSON.parse(voiceSaved));
       } catch (e) {
-        fetchRecords();
+        setVoiceAnchors(initialVoiceAnchors);
       }
     } else {
-      fetchRecords();
+      setVoiceAnchors(initialVoiceAnchors);
     }
 
-    fetchSyncEvents();
+    // Records
+    const recsSaved = localStorage.getItem(STORAGE_KEYS.RECORDS);
+    if (recsSaved) {
+      try {
+        setRecords(JSON.parse(recsSaved));
+      } catch (e) {
+        setRecords(initialRecords);
+      }
+    } else {
+      setRecords(initialRecords);
+    }
   }, []);
 
-  // Save Messages to localStorage whenever they change
+  function getDefaultMessages(): Message[] {
+    return [
+      {
+        id: "msg_intro",
+        role: "assistant",
+        content: "Studio Nexus ativo. Sistema calibrado para raciocínio analítico, síntese de voz e gestão de acervo. O que deseja explorar hoje?",
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+
+  // Sync to LocalStorage
   useEffect(() => {
     if (messages.length > 0) {
       localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(messages));
     }
   }, [messages]);
 
-  // Save Records to localStorage whenever they change
+  useEffect(() => {
+    if (voiceAnchors.length > 0) {
+      localStorage.setItem(STORAGE_KEYS.VOICE_ANCHORS, JSON.stringify(voiceAnchors));
+    }
+  }, [voiceAnchors]);
+
   useEffect(() => {
     if (records.length > 0) {
       localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(records));
     }
   }, [records]);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, botLoading]);
+  }, [messages, isReplying]);
 
-  // Login handler
+  // Auth Handlers
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    setLoginLoading(true);
-    setLoginError("");
-
     const u = loginUser.trim().toLowerCase();
     const p = loginPass.trim();
 
-    // Credenciais: vns24k / 24k (ou qualquer acesso do estúdio vn-24k)
     if ((u === "vns24k" || u === "vn-24k" || u === "admin") && (p === "24k" || p === "studio24k" || p === "admin")) {
-      setTimeout(() => {
-        localStorage.setItem(STORAGE_KEYS.AUTH, "true");
-        setIsAuthenticated(true);
-        setLoginLoading(false);
-      }, 400);
+      localStorage.setItem(STORAGE_KEYS.AUTH, "true");
+      setIsAuthenticated(true);
+      setLoginError("");
     } else {
-      setTimeout(() => {
-        setLoginError("Credenciais inválidas. Dica: Usuário vns24k | Senha: 24k");
-        setLoginLoading(false);
-      }, 300);
+      setLoginError("Credenciais não reconhecidas. Acesso restrito ao estúdio.");
     }
   };
 
@@ -203,92 +239,23 @@ export default function NexusDashboard() {
     setIsAuthenticated(false);
   };
 
-  const handleClearChat = () => {
-    if (confirm("Deseja realmente limpar o histórico do chat?")) {
-      const resetMsg: BotMessage[] = [
-        {
-          id: `msg_init_${Date.now()}`,
-          role: "bot",
-          content: "Histórico de conversa reiniciado. O que você gostaria de perguntar ou registrar agora?",
-          createdAt: new Date().toISOString(),
-        },
-      ];
-      setMessages(resetMsg);
-      localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(resetMsg));
-    }
-  };
-
-  // Fetch helpers
-  const fetchInitialMessages = async () => {
-    try {
-      const res = await fetch("/api/bot");
-      const json = await res.json();
-      if (json.success && json.data) {
-        setMessages(json.data);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const fetchRecords = async () => {
-    setRecordsLoading(true);
-    try {
-      const url = new URL("/api/records", window.location.origin);
-      if (selectedCategory !== "todos") url.searchParams.set("category", selectedCategory);
-      if (searchQuery) url.searchParams.set("q", searchQuery);
-
-      const res = await fetch(url.toString());
-      const json = await res.json();
-      if (json.success && json.data) {
-        // Merge with existing localStorage records to prevent any loss
-        setRecords((prev) => {
-          const map = new Map<string, RecordItem>();
-          for (const item of prev) map.set(item.id, item);
-          for (const item of json.data) map.set(item.id, item);
-          const merged = Array.from(map.values()).sort(
-            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-          localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(merged));
-          return merged;
-        });
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setRecordsLoading(false);
-    }
-  };
-
-  const fetchSyncEvents = async () => {
-    try {
-      const res = await fetch("/api/vault/sync");
-      const json = await res.json();
-      if (json.success && json.data) {
-        setSyncEvents(json.data);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // Bot Handler
+  // Chat Handler
   const handleSendMessage = async (e?: React.FormEvent, customPrompt?: string) => {
     if (e) e.preventDefault();
-    const promptToSend = customPrompt || inputMessage;
-    if (!promptToSend.trim() || botLoading) return;
+    const textToSend = customPrompt || prompt;
+    if (!textToSend.trim() || isReplying) return;
 
-    const userText = promptToSend.trim();
-    setInputMessage("");
-    setBotLoading(true);
+    const userText = textToSend.trim();
+    setPrompt("");
+    setIsReplying(true);
 
-    const tempUserMsg: BotMessage = {
-      id: `temp_${Date.now()}`,
+    const userMsg: Message = {
+      id: `msg_u_${Date.now()}`,
       role: "user",
       content: userText,
       createdAt: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, tempUserMsg]);
+    setMessages((prev) => [...prev, userMsg]);
 
     try {
       const res = await fetch("/api/bot", {
@@ -296,31 +263,37 @@ export default function NexusDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: userText }),
       });
-      const json = await res.json();
-      if (json.success && json.message) {
-        setMessages((prev) => [...prev, json.message]);
-        fetchRecords();
-        fetchSyncEvents();
+      const data = await res.json();
+      if (data.success && data.message) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: data.message.id || `msg_a_${Date.now()}`,
+            role: "assistant",
+            content: data.message.content,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
       }
     } catch (err) {
       console.error(err);
     } finally {
-      setBotLoading(false);
+      setIsReplying(false);
     }
   };
 
   // Play Speech (TTS)
-  const handlePlayTTS = async (msgId: string, text: string) => {
-    if (playingAudioId === msgId) {
-      if (currentAudioRef.current) {
-        currentAudioRef.current.pause();
-        currentAudioRef.current = null;
+  const handlePlayVoice = async (msgId: string, text: string) => {
+    if (playingMessageId === msgId) {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+        activeAudioRef.current = null;
       }
-      setPlayingAudioId(null);
+      setPlayingMessageId(null);
       return;
     }
 
-    setAudioLoadingId(msgId);
+    setLoadingAudioId(msgId);
     try {
       const res = await fetch("/api/tts", {
         method: "POST",
@@ -328,587 +301,497 @@ export default function NexusDashboard() {
         body: JSON.stringify({ text }),
       });
 
-      if (!res.ok) throw new Error("Falha na síntese de áudio");
+      if (!res.ok) throw new Error("Erro na síntese vocal");
 
       const blob = await res.blob();
-      const audioUrl = URL.createObjectURL(blob);
-      const audio = new Audio(audioUrl);
-      currentAudioRef.current = audio;
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      activeAudioRef.current = audio;
 
       audio.onended = () => {
-        setPlayingAudioId(null);
-        currentAudioRef.current = null;
+        setPlayingMessageId(null);
+        activeAudioRef.current = null;
       };
 
-      setPlayingAudioId(msgId);
+      setPlayingMessageId(msgId);
       audio.play();
-    } catch (e) {
-      console.error(e);
-      alert("Não foi possível reproduzir a voz no momento.");
+    } catch (err) {
+      console.error(err);
     } finally {
-      setAudioLoadingId(null);
+      setLoadingAudioId(null);
     }
   };
 
-  // Save Bot Answer to Database (Persistent!)
-  const handleSaveToDatabase = async (content: string, id: string) => {
-    try {
-      const title = content.substring(0, 45).replace(/[*#\n]/g, " ").trim() + "...";
-      const newRec: RecordItem = {
-        id: `rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        title: `Nota: ${title}`,
-        content: content,
-        category: "pesquisa",
-        status: "processado",
-        metadata: { salvoVia: "OmniBot", msgId: id },
-        createdAt: new Date().toISOString(),
-      };
-
-      // 1. Instant local persistence
-      setRecords((prev) => {
-        const updated = [newRec, ...prev];
-        localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(updated));
-        return updated;
-      });
-
-      setSavedSuccessId(id);
-      setTimeout(() => setSavedSuccessId(null), 3000);
-
-      // 2. Server persistence
-      await fetch("/api/records", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newRec),
-      });
-    } catch (e) {
-      console.error(e);
-    }
+  // Save Assistant Message to Records
+  const handleSaveToRecords = (content: string, id: string) => {
+    const titleSnippet = content.substring(0, 42).replace(/[*#\n]/g, " ").trim() + "...";
+    const newNote: RecordNote = {
+      id: `rec_${Date.now()}`,
+      title: titleSnippet,
+      content,
+      category: "pesquisa",
+      createdAt: new Date().toISOString(),
+    };
+    setRecords((prev) => [newNote, ...prev]);
+    setSavedSuccessId(id);
+    setTimeout(() => setSavedSuccessId(null), 2500);
   };
 
-  // Create record manually
-  const handleCreateRecord = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim() || !newContent.trim()) return;
+  // Voice Lab: Upload Audio File
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    const newRec: RecordItem = {
-      id: `rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      title: newTitle,
-      content: newContent,
-      category: newCategory,
-      status: "processado",
-      metadata: { criadoManualmente: true },
+    setIsUploading(true);
+    const audioUrl = URL.createObjectURL(file);
+    const newAnchor: VoiceAnchor = {
+      id: `anchor_${Date.now()}`,
+      name: uploadName.trim() || file.name.replace(/\.[^/.]+$/, ""),
+      mood: uploadMood,
+      accent: uploadAccent,
+      audioUrl: audioUrl,
+      duration: "0:08",
       createdAt: new Date().toISOString(),
     };
 
-    // 1. Instant local persistence
-    setRecords((prev) => {
-      const updated = [newRec, ...prev];
-      localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(updated));
-      return updated;
-    });
-
-    setIsAddModalOpen(false);
-    setNewTitle("");
-    setNewContent("");
-
-    // 2. Server persistence
-    try {
-      await fetch("/api/records", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newRec),
-      });
-    } catch (e) {
-      console.error(e);
-    }
+    setVoiceAnchors((prev) => [newAnchor, ...prev]);
+    setUploadName("");
+    setIsUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // Delete record
-  const handleDeleteRecord = async (id: string) => {
-    // 1. Instant local persistence
-    setRecords((prev) => {
-      const filtered = prev.filter((r) => r.id !== id);
-      localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(filtered));
-      return filtered;
-    });
-
-    // 2. Server sync
-    try {
-      await fetch(`/api/records?id=${id}`, { method: "DELETE" });
-    } catch (e) {
-      console.error(e);
-    }
+  const handleDeleteAnchor = (id: string) => {
+    setVoiceAnchors((prev) => prev.filter((a) => a.id !== id));
   };
 
-  // Trigger Sync
-  const handleTriggerSync = async () => {
-    setSyncing(true);
-    try {
-      const res = await fetch("/api/vault/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const json = await res.json();
-      if (json.success && json.data) {
-        setSyncEvents((prev) => [json.data, ...prev]);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSyncing(false);
-    }
+  // Records Actions
+  const handleCreateNote = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newNoteTitle.trim() || !newNoteContent.trim()) return;
+
+    const newNote: RecordNote = {
+      id: `rec_${Date.now()}`,
+      title: newNoteTitle.trim(),
+      content: newNoteContent.trim(),
+      category: "ideia",
+      createdAt: new Date().toISOString(),
+    };
+    setRecords((prev) => [newNote, ...prev]);
+    setNewNoteTitle("");
+    setNewNoteContent("");
+    setIsNewNoteOpen(false);
   };
 
-  // Test API Route
-  const handleTestApi = async (endpoint: string, method: string = "GET", bodyData?: any) => {
-    setTestingEndpoint(endpoint);
-    const start = performance.now();
-    try {
-      const opts: RequestInit = { method };
-      if (bodyData) {
-        opts.headers = { "Content-Type": "application/json" };
-        opts.body = JSON.stringify(bodyData);
-      }
-      const res = await fetch(endpoint, opts);
-      const json = await res.json();
-      const end = performance.now();
-      setApiLatency(Math.round(end - start));
-      setApiResponse(json);
-    } catch (err: any) {
-      setApiResponse({ error: err.message });
-      setApiLatency(null);
-    } finally {
-      setTestingEndpoint(null);
-    }
+  const handleDeleteRecord = (id: string) => {
+    setRecords((prev) => prev.filter((r) => r.id !== id));
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  // Filter records
   const filteredRecords = records.filter((r) => {
     const matchCat = selectedCategory === "todos" || r.category === selectedCategory;
     const matchSearch =
-      !searchQuery ||
-      r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.content.toLowerCase().includes(searchQuery.toLowerCase());
+      !searchFilter ||
+      r.title.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      r.content.toLowerCase().includes(searchFilter.toLowerCase());
     return matchCat && matchSearch;
   });
 
-  // Loading Screen while reading localStorage
+  // Loading state
   if (isAuthenticated === null) {
     return (
-      <div className="min-h-screen bg-[#07080c] flex items-center justify-center">
-        <div className="flex items-center space-x-3 text-amber-400 font-mono text-xs">
-          <RefreshCw size={16} className="animate-spin" />
-          <span>Carregando ambiente seguro...</span>
-        </div>
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
       </div>
     );
   }
 
-  // TELA DE LOGIN
+  // APPLE-STYLE LOGIN SCREEN
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-[#07080c] flex flex-col justify-between p-6 relative overflow-hidden">
-        {/* Ambient Glows */}
-        <div className="fixed inset-0 pointer-events-none z-0">
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl"></div>
-          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-yellow-600/10 rounded-full blur-3xl"></div>
-        </div>
+      <div className="min-h-screen bg-black flex flex-col justify-between p-6 sm:p-12 relative overflow-hidden">
+        {/* Subtle Ambient Vignette */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-zinc-900/40 via-black to-black pointer-events-none"></div>
 
         <div className="flex-1 flex items-center justify-center relative z-10">
-          <div className="glass-panel rounded-3xl w-full max-w-md p-8 border border-white/10 shadow-2xl relative">
-            {/* Header / Logo */}
+          <div className="apple-glass rounded-3xl w-full max-w-sm p-8 sm:p-10 shadow-2xl">
+            {/* Minimal Brand Mark */}
             <div className="text-center mb-8">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-600 to-yellow-400 flex items-center justify-center font-bold text-black text-2xl shadow-xl mx-auto mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-white/10 flex items-center justify-center mx-auto mb-4 text-white font-semibold text-sm tracking-tight shadow-lg">
                 VN
               </div>
-              <h1 className="text-xl font-bold tracking-tight text-white">NEXUS WORKSTATION</h1>
-              <p className="text-xs text-zinc-400 mt-1">Acesso à Central de Inteligência e Banco de Dados</p>
+              <h1 className="text-lg font-semibold tracking-tight text-white">Studio Nexus</h1>
+              <p className="text-xs text-zinc-500 mt-1">Autenticação do Estúdio</p>
             </div>
 
-            {/* Error message */}
             {loginError && (
-              <div className="mb-5 p-3 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center space-x-2 text-xs text-red-400">
-                <AlertCircle size={15} />
-                <span>{loginError}</span>
+              <div className="mb-5 p-3 rounded-xl bg-red-950/40 border border-red-500/20 text-[11px] text-red-400 text-center">
+                {loginError}
               </div>
             )}
 
-            {/* Login Form */}
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
-                <label className="text-xs font-semibold text-zinc-300 block mb-1.5 flex items-center space-x-1.5">
-                  <User size={13} className="text-amber-400" />
-                  <span>Usuário</span>
-                </label>
+                <label className="text-[11px] font-medium text-zinc-400 block mb-1.5">Usuário</label>
                 <input
                   type="text"
                   required
                   value={loginUser}
                   onChange={(e) => setLoginUser(e.target.value)}
                   placeholder="vns24k"
-                  className="w-full bg-zinc-900/90 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition font-mono"
+                  className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 transition"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-zinc-300 block mb-1.5 flex items-center space-x-1.5">
-                  <Lock size={13} className="text-amber-400" />
-                  <span>Senha de Acesso</span>
-                </label>
+                <label className="text-[11px] font-medium text-zinc-400 block mb-1.5">Senha</label>
                 <input
                   type="password"
                   required
                   value={loginPass}
                   onChange={(e) => setLoginPass(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full bg-zinc-900/90 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition font-mono"
+                  className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 transition"
                 />
               </div>
 
               <button
                 type="submit"
-                disabled={loginLoading}
-                className="w-full py-3.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-black font-bold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition flex items-center justify-center space-x-2 disabled:opacity-50 mt-2"
+                className="w-full py-3 apple-button font-medium rounded-xl text-xs mt-2"
               >
-                {loginLoading ? (
-                  <>
-                    <RefreshCw size={14} className="animate-spin" />
-                    <span>Autenticando...</span>
-                  </>
-                ) : (
-                  <>
-                    <KeyRound size={14} />
-                    <span>Acessar Plataforma</span>
-                  </>
-                )}
+                Entrar
               </button>
             </form>
 
-            {/* Credential Hint */}
             <div className="mt-6 pt-5 border-t border-white/5 text-center">
-              <span className="text-[11px] text-zinc-500 font-mono">
-                Acesso do Estúdio: <strong className="text-amber-400">vns24k</strong> | Senha: <strong className="text-amber-400">24k</strong>
+              <span className="text-[10px] text-zinc-600 font-mono">
+                Credencial padrão: vns24k / 24k
               </span>
             </div>
           </div>
         </div>
 
-        <footer className="text-center text-xs text-zinc-600 relative z-10">
-          <p>© 2026 Studio VN (vn-24k). Todos os direitos reservados.</p>
+        <footer className="text-center text-[11px] text-zinc-600 relative z-10">
+          <p>© 2026 Studio VN. Arquitetura Proprietária de Alta Fidelidade.</p>
         </footer>
       </div>
     );
   }
 
-  // DASHBOARD PRINCIPAL (AUTENTICADO)
+  // APPLE-STYLE MAIN WORKSTATION
   return (
-    <div className="flex flex-col min-h-screen bg-[#07080c] text-zinc-100">
-      {/* Top Header */}
-      <header className="sticky top-0 z-40 border-b border-white/5 bg-[#0a0d14]/80 backdrop-blur-md px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+    <div className="min-h-screen bg-black text-[#f5f5f7] flex flex-col justify-between selection:bg-white/20">
+      {/* Sleek Minimalist Navbar */}
+      <header className="sticky top-0 z-40 bg-black/75 backdrop-blur-xl border-b border-white/[0.06] px-6 py-3.5">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-yellow-400 flex items-center justify-center font-bold text-black text-lg shadow-lg">
+            <span className="w-8 h-8 rounded-xl bg-zinc-900 border border-white/10 flex items-center justify-center text-xs font-semibold text-white">
               VN
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-base font-bold tracking-tight text-white">NEXUS WORKSTATION</h1>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
-                  v2.6 Pro
-                </span>
-              </div>
-              <p className="text-xs text-zinc-400">Sessão Ativa: <span className="text-amber-300 font-mono">vns24k</span></p>
-            </div>
+            </span>
+            <span className="text-xs font-medium tracking-tight text-white">Studio Nexus</span>
           </div>
 
-          <div className="flex items-center space-x-3">
-            <div className="hidden sm:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-zinc-900/60 border border-white/5 text-xs text-zinc-300">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>Motor Neural Online</span>
-            </div>
-
+          {/* Segmented Control Pill */}
+          <nav className="flex items-center p-1 rounded-full bg-zinc-900/80 border border-white/[0.08] text-xs">
             <button
-              onClick={handleLogout}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition text-xs font-semibold"
-              title="Sair da sessão"
+              onClick={() => setCurrentTab("assistant")}
+              className={`px-4 py-1.5 rounded-full transition-all duration-200 ${
+                currentTab === "assistant"
+                  ? "bg-white text-black font-medium shadow-sm"
+                  : "text-zinc-400 hover:text-white"
+              }`}
             >
-              <LogOut size={13} />
-              <span>Sair</span>
+              Assistente
             </button>
-          </div>
+            <button
+              onClick={() => setCurrentTab("voice")}
+              className={`px-4 py-1.5 rounded-full transition-all duration-200 flex items-center space-x-1.5 ${
+                currentTab === "voice"
+                  ? "bg-white text-black font-medium shadow-sm"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              <span>Voz Real</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            </button>
+            <button
+              onClick={() => setCurrentTab("records")}
+              className={`px-4 py-1.5 rounded-full transition-all duration-200 ${
+                currentTab === "records"
+                  ? "bg-white text-black font-medium shadow-sm"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              Acervo
+            </button>
+          </nav>
+
+          <button
+            onClick={handleLogout}
+            className="text-zinc-500 hover:text-zinc-300 transition p-1.5 rounded-lg"
+            title="Encerrar sessão"
+          >
+            <LogOut size={15} />
+          </button>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 flex-1 flex flex-col space-y-6">
-        {/* Navigation Tabs */}
-        <div className="flex overflow-x-auto pb-2 scrollbar-none space-x-2 border-b border-white/5">
-          <button
-            onClick={() => setActiveTab("bot")}
-            className={`flex items-center space-x-2 px-5 py-2.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
-              activeTab === "bot"
-                ? "bg-amber-500/15 text-amber-400 border border-amber-500/30 shadow-lg shadow-amber-500/5"
-                : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
-            }`}
-          >
-            <Bot size={16} />
-            <span>OmniBot Neural</span>
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-          </button>
+      {/* Main View Area */}
+      <main className="max-w-4xl mx-auto w-full px-5 py-8 flex-1 flex flex-col justify-between">
+        {/* TAB 1: ASSISTENTE CONVERSACIONAL */}
+        {currentTab === "assistant" && (
+          <div className="flex flex-col flex-1 max-w-3xl mx-auto w-full space-y-6">
+            {/* Quick Inspiration Pills */}
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+              {[
+                "Elabore uma proposta de consultoria sênior",
+                "Explique a física de som e ressonância acústica",
+                "Quais as melhores estratégias para marcas de luxo?",
+              ].map((suggestion, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleSendMessage(undefined, suggestion)}
+                  className="px-3 py-1.5 rounded-full bg-zinc-900/60 hover:bg-zinc-800 border border-white/[0.06] text-[11px] text-zinc-400 hover:text-white transition"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
 
-          <button
-            onClick={() => setActiveTab("database")}
-            className={`flex items-center space-x-2 px-5 py-2.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
-              activeTab === "database"
-                ? "bg-amber-500/15 text-amber-400 border border-amber-500/30 shadow-lg shadow-amber-500/5"
-                : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
-            }`}
-          >
-            <Database size={16} />
-            <span>Banco de Dados</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-amber-400 font-bold">
-              {records.length}
-            </span>
-          </button>
+            {/* Messages Feed */}
+            <div className="flex-1 space-y-6 overflow-y-auto py-4 min-h-[420px] max-h-[580px] pr-1">
+              {messages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`flex flex-col ${
+                    msg.role === "user" ? "items-end" : "items-start"
+                  }`}
+                >
+                  <div
+                    className={`max-w-[88%] rounded-2xl px-5 py-3.5 text-xs leading-relaxed ${
+                      msg.role === "user"
+                        ? "bg-[#2c2c2e] text-white font-normal"
+                        : "apple-glass text-zinc-200"
+                    }`}
+                  >
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
 
-          <button
-            onClick={() => setActiveTab("api")}
-            className={`flex items-center space-x-2 px-5 py-2.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
-              activeTab === "api"
-                ? "bg-amber-500/15 text-amber-400 border border-amber-500/30 shadow-lg shadow-amber-500/5"
-                : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
-            }`}
-          >
-            <Code2 size={16} />
-            <span>API REST Explorer</span>
-          </button>
+                    {/* Assistant Actions: Audio & Bookmark */}
+                    {msg.role === "assistant" && (
+                      <div className="mt-3 pt-2.5 border-t border-white/[0.06] flex items-center space-x-3 text-[11px]">
+                        <button
+                          onClick={() => handlePlayVoice(msg.id, msg.content)}
+                          disabled={loadingAudioId === msg.id}
+                          className="flex items-center space-x-1.5 text-zinc-400 hover:text-white transition"
+                        >
+                          <Volume2 size={13} />
+                          <span>
+                            {loadingAudioId === msg.id
+                              ? "Gerando voz..."
+                              : playingMessageId === msg.id
+                              ? "Pausar"
+                              : "Ouvir com Minha Voz"}
+                          </span>
+                        </button>
 
-          <button
-            onClick={() => setActiveTab("vault")}
-            className={`flex items-center space-x-2 px-5 py-2.5 rounded-xl text-xs font-semibold transition whitespace-nowrap ${
-              activeTab === "vault"
-                ? "bg-amber-500/15 text-amber-400 border border-amber-500/30 shadow-lg shadow-amber-500/5"
-                : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
-            }`}
-          >
-            <Cloud size={16} />
-            <span>Cloud Vault Sync</span>
-          </button>
-        </div>
-
-        {/* TAB 1: OMNIBOT NEURAL */}
-        {activeTab === "bot" && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1">
-            {/* Sidebar with Prompt Suggestions */}
-            <div className="lg:col-span-1 space-y-4">
-              <div className="glass-panel rounded-2xl p-4">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2 flex items-center space-x-2">
-                  <Sparkles size={14} />
-                  <span>Perguntas & Ações Rápidas</span>
-                </h2>
-                <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
-                  O bot responde qualquer assunto e você pode salvar a resposta no banco com um clique:
-                </p>
-
-                <div className="space-y-2">
-                  {[
-                    "Como funciona a física quântica?",
-                    "Escreva uma minuta de contrato de desenvolvimento",
-                    "Qual a melhor estratégia para vender serviços?",
-                    "Crie um script em Python para automação",
-                    "Explique a Teoria da Relatividade em 3 pontos",
-                    "/add Análise de Mercado | Metas do trimestre",
-                  ].map((promptText, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => handleSendMessage(undefined, promptText)}
-                      className="w-full text-left p-2.5 rounded-xl bg-zinc-900/50 hover:bg-amber-500/10 border border-white/5 hover:border-amber-500/30 transition text-xs group"
-                    >
-                      <div className="text-zinc-300 font-medium line-clamp-2 group-hover:text-amber-300 transition">
-                        {promptText}
+                        <button
+                          onClick={() => handleSaveToRecords(msg.content, msg.id)}
+                          className="flex items-center space-x-1.5 text-zinc-400 hover:text-white transition"
+                        >
+                          {savedSuccessId === msg.id ? (
+                            <>
+                              <Check size={13} className="text-emerald-400" />
+                              <span className="text-emerald-400">Salvo no Acervo</span>
+                            </>
+                          ) : (
+                            <>
+                              <BookmarkPlus size={13} />
+                              <span>Salvar no Acervo</span>
+                            </>
+                          )}
+                        </button>
                       </div>
-                    </button>
-                  ))}
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {isReplying && (
+                <div className="flex items-start">
+                  <div className="apple-glass rounded-2xl px-4 py-3 text-xs text-zinc-400 flex items-center space-x-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white/70 animate-pulse"></span>
+                    <span>Sintetizando raciocínio...</span>
+                  </div>
+                </div>
+              )}
+              <div ref={chatBottomRef} />
+            </div>
+
+            {/* Apple Minimal Input Bar */}
+            <form
+              onSubmit={(e) => handleSendMessage(e)}
+              className="sticky bottom-4 w-full flex items-center bg-zinc-900/80 backdrop-blur-xl border border-white/10 rounded-2xl p-1.5 shadow-2xl focus-within:border-white/30 transition"
+            >
+              <input
+                type="text"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="Pergunte qualquer coisa ou digite uma instrução..."
+                className="flex-1 bg-transparent px-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={isReplying || !prompt.trim()}
+                className="w-9 h-9 rounded-xl bg-white hover:bg-zinc-200 text-black flex items-center justify-center transition disabled:opacity-20"
+              >
+                <Send size={14} />
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* TAB 2: LABORATÓRIO VOCAL (VOICE ANCHORS) */}
+        {currentTab === "voice" && (
+          <div className="max-w-3xl mx-auto w-full space-y-8 py-2">
+            {/* Header Description */}
+            <div className="text-center max-w-xl mx-auto">
+              <h2 className="text-xl font-semibold tracking-tight text-white mb-2">
+                Âncoras de Voz Real
+              </h2>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Armazene pequenos áudios da sua fala real para o modelo aprender nuances de postura corporal, sotaques e energia emocional.
+              </p>
+            </div>
+
+            {/* Upload & Add Anchor Card */}
+            <div className="apple-glass rounded-3xl p-6 sm:p-8 space-y-5">
+              <div className="text-xs font-semibold text-white tracking-tight flex items-center space-x-2">
+                <Mic size={15} className="text-emerald-400" />
+                <span>Adicionar Nova Referência de Voz</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[11px] text-zinc-400 block mb-1">Identificação</label>
+                  <input
+                    type="text"
+                    value={uploadName}
+                    onChange={(e) => setUploadName(e.target.value)}
+                    placeholder="Ex: Argumentação Firme"
+                    className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-white/30"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-zinc-400 block mb-1">Intenção / Humor</label>
+                  <select
+                    value={uploadMood}
+                    onChange={(e) => setUploadMood(e.target.value as any)}
+                    className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
+                  >
+                    <option value="firme">Firme / Autoridade</option>
+                    <option value="empolgado">Empolgado / Energia</option>
+                    <option value="calmo">Calmo / Reflexivo</option>
+                    <option value="descontraido">Descontraído / Zoeira</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-zinc-400 block mb-1">Cadência / Sotaque</label>
+                  <select
+                    value={uploadAccent}
+                    onChange={(e) => setUploadAccent(e.target.value as any)}
+                    className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
+                  >
+                    <option value="sp">Padrão São Paulo</option>
+                    <option value="carioca">Carioca</option>
+                    <option value="baiano">Baiano</option>
+                    <option value="neutro">Neutro</option>
+                  </select>
                 </div>
               </div>
 
-              {/* Status and Memory Indicator */}
-              <div className="glass-panel rounded-2xl p-4">
-                <div className="flex items-center space-x-3 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                    <CheckCircle2 size={16} />
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold text-white">Memória Persistente</div>
-                    <div className="text-[11px] text-zinc-400">Zero perda ao atualizar a página</div>
-                  </div>
-                </div>
-                <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  Histórico de chat e banco de dados salvos de forma contínua no seu navegador e sincronizados com o servidor.
-                </p>
+              {/* Upload Drop Button */}
+              <div className="pt-1 flex items-center justify-between">
+                <input
+                  type="file"
+                  accept="audio/*"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  className="hidden"
+                  id="voice-file-input"
+                />
+                <label
+                  htmlFor="voice-file-input"
+                  className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-xs text-white font-medium cursor-pointer flex items-center space-x-2 transition"
+                >
+                  <Upload size={13} />
+                  <span>Selecionar Áudio do Celular / WhatsApp</span>
+                </label>
+
+                <span className="text-[11px] text-zinc-500 font-mono">
+                  {voiceAnchors.length} âncoras salvas
+                </span>
               </div>
             </div>
 
-            {/* Chat Timeline */}
-            <div className="lg:col-span-3 flex flex-col glass-panel rounded-2xl overflow-hidden min-h-[580px] max-h-[780px]">
-              {/* Header */}
-              <div className="p-4 border-b border-white/5 flex items-center justify-between bg-black/20">
-                <div className="flex items-center space-x-2 text-xs text-zinc-300">
-                  <Bot size={15} className="text-amber-400" />
-                  <span className="font-semibold text-white">OmniBot Neural Terminal</span>
-                  <span className="text-zinc-500">•</span>
-                  <span className="text-[11px] text-emerald-400">{messages.length} mensagens salvas</span>
-                </div>
+            {/* Gallery of Voice Anchors */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider px-1">
+                Galeria de Referências Vocais
+              </h3>
 
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={handleClearChat}
-                    className="px-2.5 py-1 rounded-lg text-xs text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition"
-                    title="Limpar histórico de chat"
-                  >
-                    Limpar Chat
-                  </button>
-                </div>
-              </div>
-
-              {/* Messages Container */}
-              <div className="flex-1 p-5 overflow-y-auto space-y-4">
-                {messages.map((msg) => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {voiceAnchors.map((anchor) => (
                   <div
-                    key={msg.id}
-                    className={`flex flex-col ${
-                      msg.role === "user" ? "items-end" : "items-start"
-                    }`}
+                    key={anchor.id}
+                    className="apple-card rounded-2xl p-4 flex flex-col justify-between space-y-3"
                   >
-                    <div className="flex items-center space-x-2 text-[10px] text-zinc-500 mb-1 px-1">
-                      <span>{msg.role === "user" ? "Você" : "OmniBot Neural"}</span>
-                      <span>•</span>
-                      <span>
-                        {new Date(msg.createdAt).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-xs font-medium text-white">{anchor.name}</div>
+                        <div className="flex items-center space-x-2 mt-1">
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-300 capitalize">
+                            {anchor.mood}
+                          </span>
+                          <span className="text-[10px] text-zinc-500 uppercase font-mono">
+                            {anchor.accent}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleDeleteAnchor(anchor.id)}
+                        className="text-zinc-600 hover:text-red-400 p-1 transition"
+                        title="Remover âncora"
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
 
-                    <div
-                      className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed ${
-                        msg.role === "user"
-                          ? "bg-amber-500 text-black font-medium rounded-tr-none shadow-md shadow-amber-500/10"
-                          : "bg-zinc-900/90 border border-white/10 text-zinc-200 rounded-tl-none whitespace-pre-wrap"
-                      }`}
-                    >
-                      {msg.content}
-
-                      {/* Bot Actions: Play Voice (TTS) & Save to Database */}
-                      {msg.role === "bot" && (
-                        <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={() => handlePlayTTS(msg.id, msg.content)}
-                            disabled={audioLoadingId === msg.id}
-                            className={`flex items-center space-x-1.5 text-[11px] px-2.5 py-1 rounded-lg border transition ${
-                              playingAudioId === msg.id
-                                ? "bg-amber-500 text-black border-amber-500 font-bold animate-pulse"
-                                : "bg-black/40 text-amber-400 border-amber-500/20 hover:bg-amber-500/10"
-                            }`}
-                          >
-                            <Volume2 size={13} />
-                            <span>
-                              {audioLoadingId === msg.id
-                                ? "Gerando voz..."
-                                : playingAudioId === msg.id
-                                ? "Pausar Voz"
-                                : "Ouvir Resposta"}
-                            </span>
-                          </button>
-
-                          <button
-                            onClick={() => handleSaveToDatabase(msg.content, msg.id)}
-                            className="flex items-center space-x-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-black/40 text-zinc-400 border border-white/10 hover:text-white hover:bg-white/5 transition"
-                          >
-                            {savedSuccessId === msg.id ? (
-                              <>
-                                <Check size={13} className="text-emerald-400" />
-                                <span className="text-emerald-400 font-semibold">Salvo no Banco!</span>
-                              </>
-                            ) : (
-                              <>
-                                <BookmarkPlus size={13} />
-                                <span>Salvar no Banco</span>
-                              </>
-                            )}
-                          </button>
-
-                          <button
-                            onClick={() => copyToClipboard(msg.content)}
-                            className="flex items-center space-x-1 text-[11px] px-2 py-1 text-zinc-500 hover:text-zinc-300 transition"
-                          >
-                            <Copy size={12} />
-                            <span>Copiar</span>
-                          </button>
-                        </div>
-                      )}
+                    <div className="pt-2 border-t border-white/[0.04] flex items-center justify-between text-[11px] text-zinc-500">
+                      <span>{new Date(anchor.createdAt).toLocaleDateString()}</span>
+                      <span className="text-emerald-400 text-[10px] font-mono">Pronta para síntese</span>
                     </div>
                   </div>
                 ))}
-
-                {botLoading && (
-                  <div className="flex flex-col items-start">
-                    <div className="text-[10px] text-zinc-500 mb-1">OmniBot Neural</div>
-                    <div className="bg-zinc-900/90 border border-white/10 rounded-2xl rounded-tl-none px-4 py-3 flex items-center space-x-2 text-xs text-amber-400">
-                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
-                      <span className="font-medium text-xs">Pensando e sintetizando resposta inteligente...</span>
-                    </div>
-                  </div>
-                )}
-                <div ref={chatBottomRef} />
               </div>
-
-              {/* Input Form */}
-              <form
-                onSubmit={(e) => handleSendMessage(e)}
-                className="p-3 border-t border-white/5 bg-black/40 flex items-center space-x-3"
-              >
-                <input
-                  type="text"
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  placeholder="Pergunte qualquer coisa (física, código, negócios, contratos, cálculos)..."
-                  className="flex-1 bg-zinc-900/90 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition"
-                />
-                <button
-                  type="submit"
-                  disabled={botLoading || !inputMessage.trim()}
-                  className="px-5 py-3 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 disabled:opacity-40 disabled:cursor-not-allowed text-black font-bold rounded-xl text-xs flex items-center space-x-2 transition shadow-lg shadow-amber-500/10"
-                >
-                  <span>Enviar</span>
-                  <Send size={13} />
-                </button>
-              </form>
             </div>
           </div>
         )}
 
-        {/* TAB 2: DATABASE */}
-        {activeTab === "database" && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between">
-              <div className="flex flex-wrap items-center gap-2">
-                {["todos", "pesquisa", "audio", "documento", "financeiro", "sistema"].map((cat) => (
+        {/* TAB 3: ACERVO (RECORDS) */}
+        {currentTab === "records" && (
+          <div className="max-w-3xl mx-auto w-full space-y-6 py-2">
+            {/* Top Bar Filter & Action */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="flex items-center space-x-2">
+                {["todos", "ideia", "voz", "pesquisa"].map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat)}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold capitalize transition ${
+                    className={`px-3 py-1.5 rounded-full text-xs capitalize transition ${
                       selectedCategory === cat
-                        ? "bg-amber-500 text-black shadow-md shadow-amber-500/20 font-bold"
-                        : "bg-zinc-900/60 text-zinc-400 hover:text-white border border-white/5"
+                        ? "bg-white text-black font-medium"
+                        : "bg-zinc-900/60 text-zinc-400 hover:text-white border border-white/[0.06]"
                     }`}
                   >
                     {cat}
@@ -916,71 +799,62 @@ export default function NexusDashboard() {
                 ))}
               </div>
 
-              <div className="flex items-center space-x-3">
-                <div className="relative flex-1 sm:w-64">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <div className="flex items-center space-x-2">
+                <div className="relative flex-1 sm:w-48">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
                   <input
                     type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Filtrar registros..."
-                    className="w-full bg-zinc-900/80 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/50"
+                    value={searchFilter}
+                    onChange={(e) => setSearchFilter(e.target.value)}
+                    placeholder="Filtrar notas..."
+                    className="w-full bg-zinc-900/60 border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none"
                   />
                 </div>
 
                 <button
-                  onClick={() => setIsAddModalOpen(true)}
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-semibold rounded-xl text-xs flex items-center space-x-1.5 transition shadow-lg shadow-amber-500/10"
+                  onClick={() => setIsNewNoteOpen(true)}
+                  className="px-3 py-1.5 bg-white hover:bg-zinc-200 text-black font-medium rounded-xl text-xs flex items-center space-x-1 transition"
                 >
-                  <Plus size={15} />
-                  <span>Novo Registro</span>
+                  <Plus size={14} />
+                  <span>Nova Nota</span>
                 </button>
               </div>
             </div>
 
+            {/* Records List */}
             {filteredRecords.length === 0 ? (
-              <div className="glass-panel rounded-2xl p-12 text-center">
-                <Database size={32} className="mx-auto text-zinc-600 mb-3" />
-                <div className="text-sm font-semibold text-zinc-300">Nenhum registro encontrado</div>
-                <p className="text-xs text-zinc-500 mt-1">Crie um novo registro ou clique em &quot;Salvar no Banco&quot; no chat.</p>
+              <div className="apple-glass rounded-3xl p-12 text-center text-xs text-zinc-500">
+                Nenhum registro encontrado no acervo.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {filteredRecords.map((rec) => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {filteredRecords.map((item) => (
                   <div
-                    key={rec.id}
-                    className="glass-panel rounded-2xl p-5 hover:border-amber-500/30 transition flex flex-col justify-between space-y-4"
+                    key={item.id}
+                    className="apple-card rounded-2xl p-5 flex flex-col justify-between space-y-3"
                   >
                     <div>
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-md bg-zinc-800 text-amber-400 border border-white/5">
-                          {rec.category}
+                      <div className="flex items-start justify-between mb-2">
+                        <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-white/[0.06]">
+                          {item.category}
                         </span>
-                        <div className="flex items-center space-x-2">
-                          <span className="text-[10px] text-emerald-400 flex items-center space-x-1">
-                            <CheckCircle2 size={11} />
-                            <span>{rec.status}</span>
-                          </span>
-                          <button
-                            onClick={() => handleDeleteRecord(rec.id)}
-                            className="text-zinc-500 hover:text-red-400 transition p-1"
-                            title="Excluir registro"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => handleDeleteRecord(item.id)}
+                          className="text-zinc-600 hover:text-red-400 p-1 transition"
+                        >
+                          <Trash2 size={13} />
+                        </button>
                       </div>
-
-                      <h3 className="text-sm font-bold text-white mb-2 leading-snug">{rec.title}</h3>
-                      <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap">{rec.content}</p>
+                      <h4 className="text-xs font-semibold text-white mb-1.5 leading-snug">
+                        {item.title}
+                      </h4>
+                      <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap line-clamp-4">
+                        {item.content}
+                      </p>
                     </div>
 
-                    <div className="pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-zinc-500">
-                      <span className="font-mono text-[10px]">{rec.id}</span>
-                      <span className="flex items-center space-x-1">
-                        <Clock size={11} />
-                        <span>{new Date(rec.createdAt).toLocaleDateString()}</span>
-                      </span>
+                    <div className="pt-2 border-t border-white/[0.04] text-[10px] text-zinc-500 font-mono">
+                      {new Date(item.createdAt).toLocaleDateString()}
                     </div>
                   </div>
                 ))}
@@ -988,240 +862,60 @@ export default function NexusDashboard() {
             )}
           </div>
         )}
+      </main>
 
-        {/* TAB 3: API EXPLORER */}
-        {activeTab === "api" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-1 space-y-3">
-              <div className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2">
-                Endpoints REST Disponíveis
-              </div>
-
-              {[
-                {
-                  method: "POST",
-                  url: "/api/bot",
-                  label: "Perguntar Qualquer Coisa (IA)",
-                  body: { message: "Qual é a velocidade da luz e como ela foi calculada?" },
-                },
-                {
-                  method: "POST",
-                  url: "/api/tts",
-                  label: "Sintetizar Voz Humana (Fish Audio)",
-                  body: { text: "Olá! A síntese de voz está 100% operacional no seu servidor." },
-                },
-                { method: "GET", url: "/api/system/status", label: "Status do Cluster & Uptime", body: null },
-                { method: "GET", url: "/api/records", label: "Listar Registros do Banco", body: null },
-                {
-                  method: "POST",
-                  url: "/api/records",
-                  label: "Inserir Novo Registro",
-                  body: { title: "Planejamento 2026", content: "Metas de expansão do estúdio", category: "sistema" },
-                },
-              ].map((ep, idx) => (
-                <div
-                  key={idx}
-                  className="glass-panel rounded-xl p-3 hover:border-amber-500/30 transition flex flex-col space-y-2"
-                >
-                  <div className="flex items-center justify-between">
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${
-                        ep.method === "GET"
-                          ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                          : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                      }`}
-                    >
-                      {ep.method}
-                    </span>
-                    <button
-                      onClick={() => handleTestApi(ep.url, ep.method, ep.body)}
-                      disabled={testingEndpoint === ep.url}
-                      className="text-xs text-amber-400 hover:text-amber-300 font-semibold px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 transition flex items-center space-x-1"
-                    >
-                      <span>Executar</span>
-                      <ChevronRight size={12} />
-                    </button>
-                  </div>
-                  <div className="font-mono text-xs text-zinc-300 truncate">{ep.url}</div>
-                  <div className="text-[11px] text-zinc-400">{ep.label}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Response Viewer */}
-            <div className="lg:col-span-2 glass-panel rounded-2xl p-5 flex flex-col">
-              <div className="flex items-center justify-between pb-3 border-b border-white/5 mb-3">
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs font-bold text-white uppercase tracking-wider">Resposta da Requisição</span>
-                  {apiLatency !== null && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-mono">
-                      {apiLatency}ms
-                    </span>
-                  )}
-                </div>
-
-                {apiResponse && (
-                  <button
-                    onClick={() => copyToClipboard(JSON.stringify(apiResponse, null, 2))}
-                    className="flex items-center space-x-1 text-xs text-zinc-400 hover:text-white transition"
-                  >
-                    {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                    <span>{copied ? "Copiado!" : "Copiar JSON"}</span>
-                  </button>
-                )}
-              </div>
-
-              <div className="flex-1 bg-black/60 rounded-xl p-4 font-mono text-xs overflow-auto max-h-[500px] border border-white/5 text-amber-200">
-                {apiResponse ? (
-                  <pre>{JSON.stringify(apiResponse, null, 2)}</pre>
-                ) : (
-                  <div className="text-zinc-500 text-center py-20">
-                    Selecione um endpoint ao lado e clique em &quot;Executar&quot; para disparar uma requisição ao vivo.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: CLOUD VAULT */}
-        {activeTab === "vault" && (
-          <div className="space-y-6">
-            <div className="glass-panel-gold rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-              <div className="space-y-2">
-                <div className="flex items-center space-x-2">
-                  <ShieldCheck className="text-amber-400" size={20} />
-                  <span className="text-xs uppercase font-bold text-amber-400 tracking-wider">Cofre de Alta Segurança</span>
-                </div>
-                <h2 className="text-2xl font-bold text-white font-display">Hugging Face Vault Sync</h2>
-                <p className="text-xs text-zinc-300 max-w-xl leading-relaxed">
-                  Repositório de dataset 100% privado (<span className="font-mono text-amber-300">vns24k/vault-backup</span>). Permite sincronizar snapshots completos do banco de dados e arquivos com hash SHA-256.
-                </p>
-              </div>
-
+      {/* Modal: New Note */}
+      {isNewNoteOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="apple-glass rounded-3xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-white/5">
+              <h3 className="text-xs font-semibold text-white">Criar Registro no Acervo</h3>
               <button
-                onClick={handleTriggerSync}
-                disabled={syncing}
-                className="px-6 py-3.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-black font-bold rounded-2xl text-xs flex items-center space-x-2 shadow-xl shadow-amber-500/20 transition disabled:opacity-50"
-              >
-                <RefreshCw size={15} className={syncing ? "animate-spin" : ""} />
-                <span>{syncing ? "Sincronizando..." : "Sincronizar Banco Agora"}</span>
-              </button>
-            </div>
-
-            {/* Sync Events History */}
-            <div className="glass-panel rounded-2xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-white">Histórico de Snapshots</h3>
-                <span className="text-xs text-zinc-400">{syncEvents.length} sincronização(ões)</span>
-              </div>
-
-              <div className="space-y-3">
-                {syncEvents.map((evt) => (
-                  <div
-                    key={evt.id}
-                    className="p-4 rounded-xl bg-zinc-900/40 border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="flex items-center space-x-3">
-                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
-                        <CheckCircle2 size={16} />
-                      </div>
-                      <div>
-                        <div className="font-bold text-white font-mono">{evt.snapshotName}</div>
-                        <div className="text-[11px] text-zinc-500 font-mono mt-0.5">
-                          SHA: {evt.hash}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-6 text-[11px] text-zinc-400">
-                      <div>
-                        <span className="text-zinc-500">Arquivos: </span>
-                        <span className="text-zinc-200 font-semibold">{evt.fileCount}</span>
-                      </div>
-                      <div>
-                        <span className="text-zinc-500">Tamanho: </span>
-                        <span className="text-zinc-200 font-semibold">{evt.totalSizeMb} MB</span>
-                      </div>
-                      <div className="text-zinc-500">
-                        {new Date(evt.createdAt).toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Modal: Add New Record */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="glass-panel rounded-3xl w-full max-w-md p-6 space-y-4 border border-amber-500/30">
-            <div className="flex items-center justify-between pb-3 border-b border-white/10">
-              <h3 className="text-sm font-bold text-white">Novo Registro no Banco de Dados</h3>
-              <button
-                onClick={() => setIsAddModalOpen(false)}
+                onClick={() => setIsNewNoteOpen(false)}
                 className="text-zinc-400 hover:text-white text-xs"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleCreateRecord} className="space-y-3">
+            <form onSubmit={handleCreateNote} className="space-y-3">
               <div>
-                <label className="text-xs text-zinc-400 block mb-1">Título</label>
+                <label className="text-[11px] text-zinc-400 block mb-1">Título</label>
                 <input
                   type="text"
                   required
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="Ex: Contrato de Prestação de Serviços"
-                  className="w-full bg-zinc-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                  value={newNoteTitle}
+                  onChange={(e) => setNewNoteTitle(e.target.value)}
+                  placeholder="Ex: Insight sobre Produção Acústica"
+                  className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
                 />
               </div>
 
               <div>
-                <label className="text-xs text-zinc-400 block mb-1">Categoria</label>
-                <select
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value as any)}
-                  className="w-full bg-zinc-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
-                >
-                  <option value="pesquisa">Pesquisa</option>
-                  <option value="sistema">Sistema</option>
-                  <option value="audio">Áudio</option>
-                  <option value="documento">Documento</option>
-                  <option value="financeiro">Financeiro</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1">Conteúdo / Descrição</label>
+                <label className="text-[11px] text-zinc-400 block mb-1">Conteúdo</label>
                 <textarea
                   required
-                  rows={3}
-                  value={newContent}
-                  onChange={(e) => setNewContent(e.target.value)}
-                  placeholder="Detalhes, metadados ou observações do registro..."
-                  className="w-full bg-zinc-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                  rows={4}
+                  value={newNoteContent}
+                  onChange={(e) => setNewNoteContent(e.target.value)}
+                  placeholder="Escreva sua anotação ou diretriz..."
+                  className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
                 />
               </div>
 
               <div className="flex items-center justify-end space-x-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={() => setIsNewNoteOpen(false)}
                   className="px-4 py-2 rounded-xl text-xs text-zinc-400 hover:text-white"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-semibold rounded-xl text-xs shadow-lg shadow-amber-500/10"
+                  className="px-4 py-2 apple-button font-medium rounded-xl text-xs"
                 >
-                  Salvar Registro
+                  Salvar
                 </button>
               </div>
             </form>
@@ -1229,9 +923,9 @@ export default function NexusDashboard() {
         </div>
       )}
 
-      {/* Footer */}
-      <footer className="border-t border-white/5 py-6 px-6 text-center text-xs text-zinc-500">
-        <p>© 2026 Studio VN (vn-24k). Todos os direitos reservados. Arquitetura Proprietária de Alta Performance.</p>
+      {/* Clean Apple Footer */}
+      <footer className="border-t border-white/[0.04] py-5 px-6 text-center text-[11px] text-zinc-600">
+        <p>© 2026 Studio VN (vn-24k). Todos os direitos reservados.</p>
       </footer>
     </div>
   );
