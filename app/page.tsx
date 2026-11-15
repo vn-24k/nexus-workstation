@@ -54,8 +54,11 @@ interface RecordNote {
   id: string;
   title: string;
   content: string;
-  category: "voz" | "ideia" | "assistente" | "documento" | "pesquisa";
+  category: "voz" | "ideia" | "assistente" | "documento" | "pesquisa" | "geral";
   createdAt: string;
+  audioBase64?: string;
+  mood?: string;
+  duration?: string;
 }
 
 const STORAGE_KEYS = {
@@ -151,6 +154,10 @@ export default function StudioNexus() {
   const [newNoteContent, setNewNoteContent] = useState("");
   const [newNoteCategory, setNewNoteCategory] = useState<RecordNote["category"]>("ideia");
   const [savedSuccessId, setSavedSuccessId] = useState<string | null>(null);
+  const [savedDispatchSuccess, setSavedDispatchSuccess] = useState(false);
+  const messageAudioBlobs = useRef<Map<string, Blob>>(new Map());
+  const [playingRecordId, setPlayingRecordId] = useState<string | null>(null);
+  const recordAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   // Load from LocalStorage & Check WhatsApp Bridge
   useEffect(() => {
@@ -311,6 +318,7 @@ export default function StudioNexus() {
       if (!res.ok) throw new Error("Erro na síntese vocal");
 
       const blob = await res.blob();
+      messageAudioBlobs.current.set(msgId, blob);
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       activeAudioRef.current = audio;
@@ -654,6 +662,120 @@ export default function StudioNexus() {
     setRecords((prev) => [newNote, ...prev]);
     setSavedSuccessId(id);
     setTimeout(() => setSavedSuccessId(null), 2500);
+  };
+
+  // Save generated dispatch audio directly to Acervo
+  const handleSaveDispatchAudioToRecords = async () => {
+    if (!dispatchText.trim()) return;
+
+    let base64 = "";
+    if (dispatchAudioBlob) {
+      const buffer = await dispatchAudioBlob.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      base64 = btoa(binary);
+    }
+
+    const titleSnippet = dispatchText.substring(0, 38).replace(/[*#\n_]/g, " ").trim() + "...";
+    const newRecord: RecordNote = {
+      id: `audio_${Date.now()}`,
+      title: titleSnippet || "Mensagem de Voz Salva",
+      content: dispatchText,
+      category: "voz",
+      createdAt: new Date().toISOString(),
+      audioBase64: base64 || undefined,
+      mood: dispatchMood,
+      duration: "0:08",
+    };
+
+    setRecords((prev) => [newRecord, ...prev]);
+    setSavedDispatchSuccess(true);
+    setTimeout(() => setSavedDispatchSuccess(false), 3000);
+  };
+
+  // Save Assistant message with synthesized audio to Acervo
+  const handleSaveAssistantAudioToRecords = async (msgId: string, content: string) => {
+    const existingBlob = messageAudioBlobs.current.get(msgId);
+    let base64 = "";
+
+    if (existingBlob) {
+      const buffer = await existingBlob.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      base64 = btoa(binary);
+    }
+
+    const titleSnippet = content.substring(0, 38).replace(/[*#\n_]/g, " ").trim() + "...";
+    const newRecord: RecordNote = {
+      id: `assist_audio_${Date.now()}`,
+      title: titleSnippet || "Resposta Vocal Salva",
+      content: content,
+      category: "voz",
+      createdAt: new Date().toISOString(),
+      audioBase64: base64 || undefined,
+      mood: "sp",
+      duration: "0:10",
+    };
+
+    setRecords((prev) => [newRecord, ...prev]);
+    setSavedSuccessId(msgId);
+    setTimeout(() => setSavedSuccessId(null), 2500);
+  };
+
+  // Play / Pause audio from Acervo record
+  const handleToggleRecordAudio = (record: RecordNote) => {
+    if (!record.audioBase64) return;
+
+    if (playingRecordId === record.id) {
+      recordAudioPlayerRef.current?.pause();
+      setPlayingRecordId(null);
+    } else {
+      if (recordAudioPlayerRef.current) {
+        recordAudioPlayerRef.current.pause();
+      }
+      const dataUri = `data:audio/mp3;base64,${record.audioBase64}`;
+      const audio = new Audio(dataUri);
+      recordAudioPlayerRef.current = audio;
+      audio.onended = () => setPlayingRecordId(null);
+      audio.play();
+      setPlayingRecordId(record.id);
+    }
+  };
+
+  // Re-use saved audio directly in Disparo Vocal for 1-click WhatsApp sending
+  const handleDispatchSavedAudio = (record: RecordNote) => {
+    setDispatchText(record.content);
+    if (record.audioBase64) {
+      try {
+        const byteCharacters = atob(record.audioBase64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: "audio/mp3" });
+        const url = URL.createObjectURL(blob);
+        setDispatchAudioBlob(blob);
+        setDispatchAudioUrl(url);
+      } catch (e) {
+        console.error("Erro ao decodificar áudio salvo:", e);
+      }
+    }
+    setCurrentTab("dispatch");
+  };
+
+  const handleDownloadRecordAudio = (record: RecordNote) => {
+    if (!record.audioBase64) return;
+    const a = document.createElement("a");
+    a.href = `data:audio/mp3;base64,${record.audioBase64}`;
+    a.download = `audio_${record.id}.mp3`;
+    a.click();
   };
 
   const filteredRecords = records.filter((r) => {
@@ -1014,26 +1136,43 @@ export default function StudioNexus() {
                 </div>
 
                 {/* Dispatch Trigger Buttons */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                   <button
                     onClick={() => handleSendToWhatsApp()}
                     disabled={isSendingWhatsApp}
-                    className="py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center space-x-2 transition shadow-lg shadow-emerald-900/20 disabled:opacity-40"
+                    className="py-3 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center space-x-1.5 transition shadow-lg shadow-emerald-900/20 disabled:opacity-40"
                   >
                     {isSendingWhatsApp ? (
-                      <RefreshCw size={14} className="animate-spin" />
+                      <RefreshCw size={13} className="animate-spin" />
                     ) : (
-                      <MessageCircle size={15} />
+                      <MessageCircle size={14} />
                     )}
-                    <span>Disparar Este Áudio no WhatsApp</span>
+                    <span>Disparar WhatsApp</span>
+                  </button>
+
+                  <button
+                    onClick={handleSaveDispatchAudioToRecords}
+                    className="py-3 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-medium text-xs flex items-center justify-center space-x-1.5 transition border border-white/[0.08]"
+                  >
+                    {savedDispatchSuccess ? (
+                      <>
+                        <Check size={14} className="text-emerald-400" />
+                        <span className="text-emerald-400">Salvo no Acervo!</span>
+                      </>
+                    ) : (
+                      <>
+                        <BookmarkPlus size={14} className="text-zinc-300" />
+                        <span>Salvar no Acervo</span>
+                      </>
+                    )}
                   </button>
 
                   <a
                     href={dispatchAudioUrl}
                     download="mensagem_vocal.mp3"
-                    className="py-3 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs flex items-center justify-center space-x-2 transition border border-white/[0.06]"
+                    className="py-3 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium text-xs flex items-center justify-center space-x-1.5 transition border border-white/[0.06]"
                   >
-                    <Download size={14} />
+                    <Download size={13} />
                     <span>Baixar MP3</span>
                   </a>
                 </div>
@@ -1096,7 +1235,7 @@ export default function StudioNexus() {
                         </button>
 
                         <button
-                          onClick={() => handleSaveToRecords(msg.content, msg.id)}
+                          onClick={() => handleSaveAssistantAudioToRecords(msg.id, msg.content)}
                           className="flex items-center space-x-1.5 text-zinc-400 hover:text-white transition"
                         >
                           {savedSuccessId === msg.id ? (
@@ -1486,13 +1625,26 @@ export default function StudioNexus() {
                 {filteredRecords.map((item) => (
                   <div
                     key={item.id}
-                    className="apple-card rounded-2xl p-5 flex flex-col justify-between space-y-4 hover:border-white/20 transition group"
+                    className="apple-card rounded-2xl p-5 flex flex-col justify-between space-y-3.5 hover:border-white/20 transition group"
                   >
                     <div>
                       <div className="flex items-start justify-between mb-2">
-                        <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-white/[0.06]">
-                          {item.category}
-                        </span>
+                        <div className="flex items-center space-x-1.5">
+                          <span className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded-full border ${
+                            item.category === "voz"
+                              ? "bg-emerald-950/40 border-emerald-500/30 text-emerald-300"
+                              : "bg-zinc-800 text-zinc-400 border-white/[0.06]"
+                          }`}>
+                            {item.category === "voz" ? "🎙️ Áudio Salvo" : item.category}
+                          </span>
+
+                          {item.mood && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-300 capitalize">
+                              {item.mood}
+                            </span>
+                          )}
+                        </div>
+
                         <div className="flex items-center space-x-1 opacity-70 group-hover:opacity-100 transition">
                           <button
                             onClick={() => handleCopyNote(item.id, item.content)}
@@ -1515,9 +1667,37 @@ export default function StudioNexus() {
                         {item.title}
                       </h4>
 
-                      <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap line-clamp-4">
+                      <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap line-clamp-3">
                         {item.content}
                       </p>
+
+                      {/* Integrated Audio Player (for Saved Voice Notes) */}
+                      {item.audioBase64 && (
+                        <div className="flex items-center space-x-3 bg-black/50 p-2.5 rounded-xl border border-white/[0.06] mt-3">
+                          <button
+                            onClick={() => handleToggleRecordAudio(item)}
+                            className="w-8 h-8 rounded-full bg-white text-black flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition shadow-md cursor-pointer"
+                            title="Ouvir Áudio Salvo"
+                          >
+                            {playingRecordId === item.id ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] text-zinc-200 font-medium truncate">
+                              {playingRecordId === item.id ? "Reproduzindo áudio..." : "Áudio com sua Voz Real"}
+                            </div>
+                            <div className="text-[10px] text-emerald-400 font-mono">
+                              {item.duration || "0:08"} • PTT WhatsApp Pronto
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleDownloadRecordAudio(item)}
+                            className="p-1.5 rounded-lg text-zinc-400 hover:text-white transition"
+                            title="Baixar arquivo MP3"
+                          >
+                            <Download size={13} />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {/* Action Bar inside card: Quick Dispatch */}
@@ -1526,15 +1706,27 @@ export default function StudioNexus() {
                         {new Date(item.createdAt).toLocaleDateString()}
                       </span>
 
-                      <button
-                        onClick={() => handleUseInDispatch(item.content)}
-                        className="py-1.5 px-3 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 text-white text-[11px] font-medium flex items-center space-x-1.5 transition shadow-sm"
-                        title="Enviar texto para a aba Disparo Vocal"
-                      >
-                        <MessageCircle size={12} />
-                        <span>Usar no Disparo</span>
-                        <ArrowRight size={11} />
-                      </button>
+                      {item.audioBase64 ? (
+                        <button
+                          onClick={() => handleDispatchSavedAudio(item)}
+                          className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium flex items-center space-x-1.5 transition shadow-sm cursor-pointer"
+                          title="Enviar este áudio salvo para o WhatsApp"
+                        >
+                          <MessageCircle size={12} />
+                          <span>Disparar no WhatsApp</span>
+                          <ArrowRight size={11} />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleUseInDispatch(item.content)}
+                          className="py-1.5 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-medium flex items-center space-x-1.5 transition border border-white/[0.06] cursor-pointer"
+                          title="Enviar texto para a aba Disparo Vocal"
+                        >
+                          <MessageCircle size={12} />
+                          <span>Usar no Disparo</span>
+                          <ArrowRight size={11} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
