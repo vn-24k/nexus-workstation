@@ -24,16 +24,23 @@ import {
   Download,
   CheckCircle2,
   AlertCircle,
+  Square,
+  Copy,
+  Radio,
+  ArrowRight,
 } from "lucide-react";
 
 interface VoiceAnchor {
   id: string;
   name: string;
-  mood: "firme" | "empolgado" | "calmo" | "descontraido";
+  mood: "firme" | "empolgado" | "calmo" | "engracado" | "descontraido";
   accent: "sp" | "carioca" | "baiano" | "neutro";
   audioUrl: string;
   duration?: string;
   createdAt: string;
+  energy?: string;
+  confidence?: number;
+  aiAnalysis?: string;
 }
 
 interface Message {
@@ -47,7 +54,7 @@ interface RecordNote {
   id: string;
   title: string;
   content: string;
-  category: "voz" | "ideia" | "documento" | "pesquisa";
+  category: "voz" | "ideia" | "assistente" | "documento" | "pesquisa";
   createdAt: string;
 }
 
@@ -101,12 +108,39 @@ export default function StudioNexus() {
   const [whatsappResult, setWhatsappResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [bridgeConnected, setBridgeConnected] = useState<boolean | null>(null);
 
-  // Voice Lab
+  // Voice Lab & Live Recording
   const [voiceAnchors, setVoiceAnchors] = useState<VoiceAnchor[]>([]);
   const [uploadName, setUploadName] = useState("");
   const [uploadMood, setUploadMood] = useState<VoiceAnchor["mood"]>("firme");
   const [uploadAccent, setUploadAccent] = useState<VoiceAnchor["accent"]>("sp");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Live Microphone Recording & AI Analysis State
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
+  const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
+  const [voiceAnalysis, setVoiceAnalysis] = useState<{
+    mood: string;
+    moodLabel: string;
+    moodIcon: string;
+    confidence: number;
+    energy: string;
+    energyScore: number;
+    cadence: string;
+    accent: string;
+    accentLabel: string;
+    suggestedName: string;
+    analysis: string;
+  } | null>(null);
+
+  const [playingAnchorId, setPlayingAnchorId] = useState<string | null>(null);
+  const anchorAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
 
   // Records / Acervo
   const [records, setRecords] = useState<RecordNote[]>([]);
@@ -115,6 +149,7 @@ export default function StudioNexus() {
   const [isNewNoteOpen, setIsNewNoteOpen] = useState(false);
   const [newNoteTitle, setNewNoteTitle] = useState("");
   const [newNoteContent, setNewNoteContent] = useState("");
+  const [newNoteCategory, setNewNoteCategory] = useState<RecordNote["category"]>("ideia");
   const [savedSuccessId, setSavedSuccessId] = useState<string | null>(null);
 
   // Load from LocalStorage & Check WhatsApp Bridge
@@ -405,6 +440,148 @@ export default function StudioNexus() {
     }
   };
 
+  // Live Microphone Recording & AI Analysis Functions
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: mediaRecorder.mimeType || "audio/webm",
+        });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        setRecordedBlob(audioBlob);
+        setRecordedAudioUrl(audioUrl);
+
+        // Stop media tracks
+        stream.getTracks().forEach((track) => track.stop());
+
+        // Trigger AI emotion and acoustic analysis
+        analyzeVoiceAudio(audioBlob);
+      };
+
+      mediaRecorder.start(200);
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      setRecordedBlob(null);
+      setRecordedAudioUrl(null);
+      setVoiceAnalysis(null);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      alert("Acesso ao microfone necessário para gravar sua voz: " + (err.message || err));
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    }
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    }
+    setRecordedBlob(null);
+    setRecordedAudioUrl(null);
+    setVoiceAnalysis(null);
+    setRecordingSeconds(0);
+  };
+
+  const analyzeVoiceAudio = async (blob: Blob, textHint?: string) => {
+    setIsAnalyzingVoice(true);
+    try {
+      const arrayBuf = await blob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuf);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const audioBase64 = btoa(binary);
+
+      const res = await fetch("/api/voice/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          audioBase64,
+          mimeType: blob.type,
+          duration: recordingSeconds || 8,
+          textHint,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        setVoiceAnalysis(data);
+        setUploadName(data.suggestedName || "Amostra Gravada");
+        setUploadMood(data.mood || "firme");
+        setUploadAccent(data.accent || "sp");
+      }
+    } catch (e) {
+      console.error("Erro na análise acústica:", e);
+    } finally {
+      setIsAnalyzingVoice(false);
+    }
+  };
+
+  const handleSaveRecordedAnchor = () => {
+    if (!recordedAudioUrl) return;
+
+    const newAnchor: VoiceAnchor = {
+      id: `anchor_${Date.now()}`,
+      name: uploadName.trim() || voiceAnalysis?.suggestedName || "Amostra Vocal",
+      mood: (voiceAnalysis?.mood as any) || uploadMood,
+      accent: (voiceAnalysis?.accent as any) || uploadAccent,
+      audioUrl: recordedAudioUrl,
+      duration: `${recordingSeconds}s`,
+      createdAt: new Date().toISOString(),
+      energy: voiceAnalysis?.energy,
+      confidence: voiceAnalysis?.confidence,
+      aiAnalysis: voiceAnalysis?.analysis,
+    };
+
+    setVoiceAnchors((prev) => [newAnchor, ...prev]);
+    cancelRecording();
+    setUploadName("");
+  };
+
+  const handleToggleAnchorAudio = (anchor: VoiceAnchor) => {
+    if (playingAnchorId === anchor.id) {
+      anchorAudioRef.current?.pause();
+      setPlayingAnchorId(null);
+    } else {
+      if (anchorAudioRef.current) {
+        anchorAudioRef.current.pause();
+      }
+      anchorAudioRef.current = new Audio(anchor.audioUrl);
+      anchorAudioRef.current.onended = () => setPlayingAnchorId(null);
+      anchorAudioRef.current.play();
+      setPlayingAnchorId(anchor.id);
+    }
+  };
+
   // Voice Lab: Upload Audio File
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -430,6 +607,18 @@ export default function StudioNexus() {
     setVoiceAnchors((prev) => prev.filter((a) => a.id !== id));
   };
 
+  // Quick Action: Use Record content directly in Vocal Dispatch
+  const handleUseInDispatch = (content: string) => {
+    setDispatchText(content);
+    setCurrentTab("dispatch");
+  };
+
+  const handleCopyNote = (id: string, content: string) => {
+    navigator.clipboard.writeText(content);
+    setCopiedNoteId(id);
+    setTimeout(() => setCopiedNoteId(null), 2000);
+  };
+
   // Records Actions
   const handleCreateNote = (e: React.FormEvent) => {
     e.preventDefault();
@@ -439,12 +628,13 @@ export default function StudioNexus() {
       id: `rec_${Date.now()}`,
       title: newNoteTitle.trim(),
       content: newNoteContent.trim(),
-      category: "ideia",
+      category: newNoteCategory,
       createdAt: new Date().toISOString(),
     };
     setRecords((prev) => [newNote, ...prev]);
     setNewNoteTitle("");
     setNewNoteContent("");
+    setNewNoteCategory("ideia");
     setIsNewNoteOpen(false);
   };
 
@@ -458,7 +648,7 @@ export default function StudioNexus() {
       id: `rec_${Date.now()}`,
       title: titleSnippet,
       content,
-      category: "pesquisa",
+      category: "assistente",
       createdAt: new Date().toISOString(),
     };
     setRecords((prev) => [newNote, ...prev]);
@@ -971,207 +1161,380 @@ export default function StudioNexus() {
           </div>
         )}
 
-        {/* TAB 3: LABORATÓRIO VOCAL (VOICE ANCHORS) */}
+        {/* TAB 3: CALIBRAÇÃO & VOZ REAL (LIVE RECORDING + AI EMOTION DETECTOR) */}
         {currentTab === "voice" && (
-          <div className="max-w-3xl mx-auto w-full space-y-8 py-2">
-            <div className="text-center max-w-xl mx-auto">
-              <h2 className="text-xl font-semibold tracking-tight text-white mb-2">
-                Âncoras de Voz Real
+          <div className="max-w-3xl mx-auto w-full space-y-7 py-2">
+            {/* Header */}
+            <div className="text-center max-w-xl mx-auto space-y-2">
+              <h2 className="text-xl font-semibold tracking-tight text-white">
+                Laboratório de Voz Real
               </h2>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                Armazene pequenos áudios da sua fala real para o modelo aprender nuances de postura corporal, sotaques e energia emocional.
+                Grave ou envie áudios da sua voz autêntica. A inteligência neural analisa a entonação (bravo, calmo, engraçado, etc.) e refina o modelo de clonagem contínuo.
               </p>
-            </div>
-
-            <div className="apple-glass rounded-3xl p-6 sm:p-8 space-y-5">
-              <div className="text-xs font-semibold text-white tracking-tight flex items-center space-x-2">
-                <Mic size={15} className="text-emerald-400" />
-                <span>Adicionar Nova Referência de Voz</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[11px] text-zinc-400 block mb-1">Identificação</label>
-                  <input
-                    type="text"
-                    value={uploadName}
-                    onChange={(e) => setUploadName(e.target.value)}
-                    placeholder="Ex: Argumentação Firme"
-                    className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-white/30"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] text-zinc-400 block mb-1">Intenção / Humor</label>
-                  <select
-                    value={uploadMood}
-                    onChange={(e) => setUploadMood(e.target.value as any)}
-                    className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
-                  >
-                    <option value="firme">Firme / Autoridade</option>
-                    <option value="empolgado">Empolgado / Energia</option>
-                    <option value="calmo">Calmo / Reflexivo</option>
-                    <option value="descontraido">Descontraído / Zoeira</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[11px] text-zinc-400 block mb-1">Cadência / Sotaque</label>
-                  <select
-                    value={uploadAccent}
-                    onChange={(e) => setUploadAccent(e.target.value as any)}
-                    className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
-                  >
-                    <option value="sp">Padrão São Paulo</option>
-                    <option value="carioca">Carioca</option>
-                    <option value="baiano">Baiano</option>
-                    <option value="neutro">Neutro</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="pt-1 flex items-center justify-between">
-                <input
-                  type="file"
-                  accept="audio/*"
-                  ref={fileInputRef}
-                  onChange={handleFileUpload}
-                  className="hidden"
-                  id="voice-file-input"
-                />
-                <label
-                  htmlFor="voice-file-input"
-                  className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-xs text-white font-medium cursor-pointer flex items-center space-x-2 transition"
-                >
-                  <Upload size={13} />
-                  <span>Selecionar Áudio do Celular / WhatsApp</span>
-                </label>
-
-                <span className="text-[11px] text-zinc-500 font-mono">
-                  {voiceAnchors.length} âncoras salvas
-                </span>
+              <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-zinc-900/80 border border-white/[0.08] text-[10px] text-zinc-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Análise de Emoção Ativa</span>
+                <span className="text-zinc-600">•</span>
+                <span className="text-zinc-400 font-mono">{voiceAnchors.length} Amostras Salvas</span>
               </div>
             </div>
 
-            <div className="space-y-3">
-              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider px-1">
-                Galeria de Referências Vocais
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {voiceAnchors.map((anchor) => (
-                  <div
-                    key={anchor.id}
-                    className="apple-card rounded-2xl p-4 flex flex-col justify-between space-y-3"
+            {/* Recording & Input Station */}
+            <div className="apple-glass rounded-3xl p-6 sm:p-7 space-y-5">
+              {!isRecording && !recordedAudioUrl && (
+                <div className="space-y-4">
+                  {/* Primary Record Button */}
+                  <button
+                    onClick={startRecording}
+                    className="w-full py-5 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-500 hover:from-red-500 hover:to-rose-400 text-white font-medium text-xs flex items-center justify-center space-x-3 shadow-xl shadow-red-950/40 hover:scale-[1.01] active:scale-[0.99] transition cursor-pointer"
                   >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="text-xs font-medium text-white">{anchor.name}</div>
-                        <div className="flex items-center space-x-2 mt-1">
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-300 capitalize">
-                            {anchor.mood}
-                          </span>
-                          <span className="text-[10px] text-zinc-500 uppercase font-mono">
-                            {anchor.accent}
-                          </span>
+                    <div className="w-3.5 h-3.5 rounded-full bg-white animate-pulse"></div>
+                    <span className="text-sm font-semibold tracking-tight">Gravar Amostra com Microfone</span>
+                    <span className="text-white/70 text-xs font-normal hidden sm:inline">(Fale naturalmente por 5 a 15s)</span>
+                  </button>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[11px] text-zinc-500">Ou envie um áudio já gravado do celular:</span>
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      ref={fileInputRef}
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      id="voice-file-input"
+                    />
+                    <label
+                      htmlFor="voice-file-input"
+                      className="px-3.5 py-1.5 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 border border-white/10 text-[11px] text-zinc-300 hover:text-white cursor-pointer flex items-center space-x-1.5 transition"
+                    >
+                      <Upload size={12} />
+                      <span>Selecionar Arquivo</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* State: Recording Active */}
+              {isRecording && (
+                <div className="py-6 px-4 rounded-2xl bg-red-950/30 border border-red-500/30 text-center space-y-4 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-center space-x-2">
+                    <span className="w-3 h-3 rounded-full bg-red-500 animate-ping"></span>
+                    <span className="text-xs font-semibold text-red-300 uppercase tracking-wider">
+                      Gravando sua fala real...
+                    </span>
+                  </div>
+
+                  <div className="font-mono text-3xl font-bold text-white tracking-wider">
+                    00:{recordingSeconds.toString().padStart(2, "0")}
+                  </div>
+
+                  <p className="text-[11px] text-zinc-400 max-w-sm mx-auto">
+                    Fale em qualquer tom: bravo, calmo, fazendo piada ou conversando. A IA vai detectar o tom assim que você parar.
+                  </p>
+
+                  <div className="flex items-center justify-center space-x-3 pt-2">
+                    <button
+                      onClick={cancelRecording}
+                      className="px-4 py-2.5 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white text-xs transition"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={stopRecording}
+                      className="px-6 py-2.5 rounded-xl bg-white text-black font-semibold text-xs flex items-center space-x-2 shadow-lg hover:scale-105 active:scale-95 transition"
+                    >
+                      <Square size={13} fill="currentColor" />
+                      <span>Parar e Identificar com IA</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* State: Recorded Audio Ready & AI Analysis */}
+              {recordedAudioUrl && (
+                <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
+                    <div className="flex items-center space-x-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                      <span className="text-xs font-semibold text-white">Áudio Gravado com Sucesso</span>
+                    </div>
+                    <span className="text-[10px] text-zinc-500 font-mono">{recordingSeconds}s capturados</span>
+                  </div>
+
+                  {/* Audio Player */}
+                  <audio controls src={recordedAudioUrl} className="w-full h-10 rounded-xl" />
+
+                  {/* AI Analysis Box */}
+                  {isAnalyzingVoice ? (
+                    <div className="p-5 rounded-2xl bg-zinc-900/60 border border-white/10 flex items-center justify-center space-x-3 text-xs text-zinc-300">
+                      <RefreshCw size={15} className="animate-spin text-emerald-400" />
+                      <span>IA Analisando espectro de voz e tom emocional...</span>
+                    </div>
+                  ) : voiceAnalysis ? (
+                    <div className="p-4 sm:p-5 rounded-2xl bg-zinc-900/90 border border-white/15 space-y-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="text-[10px] uppercase font-mono text-zinc-500">Diagnóstico da IA</div>
+                          <div className="text-sm font-semibold text-white flex items-center space-x-2 mt-0.5">
+                            <span className="text-lg">{voiceAnalysis.moodIcon}</span>
+                            <span>{voiceAnalysis.moodLabel}</span>
+                          </div>
+                        </div>
+
+                        <span className="text-[10px] font-mono px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          {voiceAnalysis.confidence}% precisão
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 py-2 border-y border-white/[0.06] text-[11px]">
+                        <div>
+                          <span className="text-zinc-500 block text-[10px]">Energia Vocal</span>
+                          <span className="text-zinc-200 font-medium">{voiceAnalysis.energy}</span>
+                        </div>
+                        <div>
+                          <span className="text-zinc-500 block text-[10px]">Cadência de Fala</span>
+                          <span className="text-zinc-200 font-medium truncate">{voiceAnalysis.cadence}</span>
+                        </div>
+                        <div>
+                          <span className="text-zinc-500 block text-[10px]">Sotaque / Região</span>
+                          <span className="text-zinc-200 font-medium">{voiceAnalysis.accentLabel}</span>
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => handleDeleteAnchor(anchor.id)}
-                        className="text-zinc-600 hover:text-red-400 p-1 transition"
-                        title="Remover âncora"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
+                      <p className="text-[11px] text-zinc-400 leading-relaxed">
+                        {voiceAnalysis.analysis}
+                      </p>
 
-                    <div className="pt-2 border-t border-white/[0.04] flex items-center justify-between text-[11px] text-zinc-500">
-                      <span>{new Date(anchor.createdAt).toLocaleDateString()}</span>
-                      <span className="text-emerald-400 text-[10px] font-mono">Pronta para síntese</span>
+                      {/* Name / Mood Confirmation Input */}
+                      <div className="pt-1">
+                        <label className="text-[10px] text-zinc-400 block mb-1">Nome da Amostra</label>
+                        <input
+                          type="text"
+                          value={uploadName}
+                          onChange={(e) => setUploadName(e.target.value)}
+                          placeholder="Nome da amostra..."
+                          className="w-full bg-zinc-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
+                        />
+                      </div>
+
+                      {/* Action Save or Discard */}
+                      <div className="flex items-center justify-end space-x-2 pt-2">
+                        <button
+                          onClick={cancelRecording}
+                          className="px-4 py-2 rounded-xl text-xs text-zinc-400 hover:text-white transition"
+                        >
+                          Descartar
+                        </button>
+                        <button
+                          onClick={handleSaveRecordedAnchor}
+                          className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center space-x-1.5 shadow-lg transition cursor-pointer"
+                        >
+                          <Check size={14} />
+                          <span>Salvar como Âncora no Modelo</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            {/* Gallery of Saved Voice Anchors */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                  Galeria de Âncoras Calibradas
+                </h3>
+                <span className="text-[11px] text-zinc-500 font-mono">
+                  {voiceAnchors.length} no acervo
+                </span>
               </div>
+
+              {voiceAnchors.length === 0 ? (
+                <div className="apple-glass rounded-2xl p-8 text-center text-xs text-zinc-500">
+                  Nenhuma âncora gravada ainda. Grave seu primeiro áudio acima para treinar a IA com suas expressões reais!
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {voiceAnchors.map((anchor) => (
+                    <div
+                      key={anchor.id}
+                      className="apple-card rounded-2xl p-4 flex flex-col justify-between space-y-3"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 pr-2">
+                          <div className="text-xs font-medium text-white truncate">{anchor.name}</div>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-300 capitalize">
+                              {anchor.mood === "firme" && "😠 Firme / Bravo"}
+                              {anchor.mood === "calmo" && "😌 Calmo / Afeto"}
+                              {anchor.mood === "engracado" && "😂 Engraçado"}
+                              {anchor.mood === "empolgado" && "⚡ Empolgado"}
+                              {anchor.mood === "descontraido" && "😎 Descontraído"}
+                            </span>
+                            <span className="text-[10px] text-zinc-500 uppercase font-mono">
+                              {anchor.accent}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-1">
+                          <button
+                            onClick={() => handleToggleAnchorAudio(anchor)}
+                            className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white transition"
+                            title="Ouvir Amostra"
+                          >
+                            {playingAnchorId === anchor.id ? <Pause size={12} /> : <Play size={12} className="ml-0.5" />}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAnchor(anchor.id)}
+                            className="p-1.5 rounded-lg text-zinc-600 hover:text-red-400 transition"
+                            title="Remover"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {anchor.aiAnalysis && (
+                        <p className="text-[10px] text-zinc-500 line-clamp-2 leading-relaxed italic">
+                          "{anchor.aiAnalysis}"
+                        </p>
+                      )}
+
+                      <div className="pt-2 border-t border-white/[0.04] flex items-center justify-between text-[10px] text-zinc-500 font-mono">
+                        <span>{new Date(anchor.createdAt).toLocaleDateString()}</span>
+                        <span className="text-emerald-400">Ativa para síntese</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* TAB 4: ACERVO (RECORDS) */}
+        {/* TAB 4: ACERVO (ORGANIZED VAULT & QUICK VOCAL DISPATCH) */}
         {currentTab === "records" && (
           <div className="max-w-3xl mx-auto w-full space-y-6 py-2">
+            {/* Header & Controls */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-              <div className="flex items-center space-x-2">
-                {["todos", "ideia", "voz", "pesquisa"].map((cat) => (
+              {/* Category Pills */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { id: "todos", label: "Todos" },
+                  { id: "voz", label: "🎙️ Voz & Mensagens" },
+                  { id: "ideia", label: "💡 Roteiros" },
+                  { id: "assistente", label: "📋 Do Assistente" },
+                  { id: "geral", label: "📁 Geral" },
+                ].map((cat) => (
                   <button
-                    key={cat}
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`px-3 py-1.5 rounded-full text-xs capitalize transition ${
-                      selectedCategory === cat
-                        ? "bg-white text-black font-medium"
+                    key={cat.id}
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className={`px-3 py-1.5 rounded-full text-xs transition ${
+                      selectedCategory === cat.id
+                        ? "bg-white text-black font-medium shadow-sm"
                         : "bg-zinc-900/60 text-zinc-400 hover:text-white border border-white/[0.06]"
                     }`}
                   >
-                    {cat}
+                    {cat.label}
                   </button>
                 ))}
               </div>
 
+              {/* Search & New Note */}
               <div className="flex items-center space-x-2">
-                <div className="relative flex-1 sm:w-48">
+                <div className="relative flex-1 sm:w-44">
                   <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
                   <input
                     type="text"
                     value={searchFilter}
                     onChange={(e) => setSearchFilter(e.target.value)}
-                    placeholder="Filtrar notas..."
-                    className="w-full bg-zinc-900/60 border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none"
+                    placeholder="Filtrar acervo..."
+                    className="w-full bg-zinc-900/60 border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white/30"
                   />
                 </div>
 
                 <button
                   onClick={() => setIsNewNoteOpen(true)}
-                  className="px-3 py-1.5 bg-white hover:bg-zinc-200 text-black font-medium rounded-xl text-xs flex items-center space-x-1 transition"
+                  className="px-3.5 py-1.5 bg-white hover:bg-zinc-200 text-black font-medium rounded-xl text-xs flex items-center space-x-1.5 transition cursor-pointer"
                 >
                   <Plus size={14} />
-                  <span>Nova Nota</span>
+                  <span>Novo</span>
                 </button>
               </div>
             </div>
 
+            {/* Records List */}
             {filteredRecords.length === 0 ? (
-              <div className="apple-glass rounded-3xl p-12 text-center text-xs text-zinc-500">
-                Nenhum registro encontrado no acervo.
+              <div className="apple-glass rounded-3xl p-12 text-center space-y-3">
+                <div className="text-zinc-400 text-sm font-medium">Acervo sem registros no filtro atual</div>
+                <p className="text-xs text-zinc-500 max-w-sm mx-auto leading-relaxed">
+                  Salve respostas do Assistente, guarde roteiros de áudios frequentes ou crie notas rápidas para disparar no WhatsApp com sua voz.
+                </p>
+                <button
+                  onClick={() => setIsNewNoteOpen(true)}
+                  className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-white transition inline-flex items-center space-x-1.5 mt-2"
+                >
+                  <Plus size={13} />
+                  <span>Criar Primeiro Registro</span>
+                </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 {filteredRecords.map((item) => (
                   <div
                     key={item.id}
-                    className="apple-card rounded-2xl p-5 flex flex-col justify-between space-y-3"
+                    className="apple-card rounded-2xl p-5 flex flex-col justify-between space-y-4 hover:border-white/20 transition group"
                   >
                     <div>
                       <div className="flex items-start justify-between mb-2">
                         <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-white/[0.06]">
                           {item.category}
                         </span>
-                        <button
-                          onClick={() => handleDeleteRecord(item.id)}
-                          className="text-zinc-600 hover:text-red-400 p-1 transition"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <div className="flex items-center space-x-1 opacity-70 group-hover:opacity-100 transition">
+                          <button
+                            onClick={() => handleCopyNote(item.id, item.content)}
+                            className="text-zinc-500 hover:text-white p-1 transition"
+                            title="Copiar conteúdo"
+                          >
+                            {copiedNoteId === item.id ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteRecord(item.id)}
+                            className="text-zinc-500 hover:text-red-400 p-1 transition"
+                            title="Excluir do acervo"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
                       </div>
+
                       <h4 className="text-xs font-semibold text-white mb-1.5 leading-snug">
                         {item.title}
                       </h4>
-                      <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap line-clamp-4">
+
+                      <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap line-clamp-4">
                         {item.content}
                       </p>
                     </div>
 
-                    <div className="pt-2 border-t border-white/[0.04] text-[10px] text-zinc-500 font-mono">
-                      {new Date(item.createdAt).toLocaleDateString()}
+                    {/* Action Bar inside card: Quick Dispatch */}
+                    <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between">
+                      <span className="text-[10px] text-zinc-500 font-mono">
+                        {new Date(item.createdAt).toLocaleDateString()}
+                      </span>
+
+                      <button
+                        onClick={() => handleUseInDispatch(item.content)}
+                        className="py-1.5 px-3 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 text-white text-[11px] font-medium flex items-center space-x-1.5 transition shadow-sm"
+                        title="Enviar texto para a aba Disparo Vocal"
+                      >
+                        <MessageCircle size={12} />
+                        <span>Usar no Disparo</span>
+                        <ArrowRight size={11} />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -1196,26 +1559,41 @@ export default function StudioNexus() {
             </div>
 
             <form onSubmit={handleCreateNote} className="space-y-3">
-              <div>
-                <label className="text-[11px] text-zinc-400 block mb-1">Título</label>
-                <input
-                  type="text"
-                  required
-                  value={newNoteTitle}
-                  onChange={(e) => setNewNoteTitle(e.target.value)}
-                  placeholder="Ex: Insight sobre Produção Acústica"
-                  className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] text-zinc-400 block mb-1">Título</label>
+                  <input
+                    type="text"
+                    required
+                    value={newNoteTitle}
+                    onChange={(e) => setNewNoteTitle(e.target.value)}
+                    placeholder="Ex: Frase de Efeito..."
+                    className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-zinc-400 block mb-1">Categoria</label>
+                  <select
+                    value={newNoteCategory}
+                    onChange={(e) => setNewNoteCategory(e.target.value as any)}
+                    className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
+                  >
+                    <option value="ideia">💡 Roteiro / Frase</option>
+                    <option value="voz">🎙️ Mensagem de Voz</option>
+                    <option value="assistente">📋 Do Assistente</option>
+                    <option value="geral">📁 Geral</option>
+                  </select>
+                </div>
               </div>
 
               <div>
-                <label className="text-[11px] text-zinc-400 block mb-1">Conteúdo</label>
+                <label className="text-[11px] text-zinc-400 block mb-1">Conteúdo da Mensagem ou Nota</label>
                 <textarea
                   required
                   rows={4}
                   value={newNoteContent}
                   onChange={(e) => setNewNoteContent(e.target.value)}
-                  placeholder="Escreva sua anotação ou diretriz..."
+                  placeholder="Escreva sua anotação ou roteiro de fala..."
                   className="w-full bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/30"
                 />
               </div>
