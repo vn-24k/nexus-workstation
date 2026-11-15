@@ -23,6 +23,7 @@ import {
   MessageCircle,
   Download,
   CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 
 interface VoiceAnchor {
@@ -96,6 +97,9 @@ export default function StudioNexus() {
   const [dispatchAudioUrl, setDispatchAudioUrl] = useState<string | null>(null);
   const [isPlayingDispatchAudio, setIsPlayingDispatchAudio] = useState(false);
   const dispatchAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [whatsappResult, setWhatsappResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [bridgeConnected, setBridgeConnected] = useState<boolean | null>(null);
 
   // Voice Lab
   const [voiceAnchors, setVoiceAnchors] = useState<VoiceAnchor[]>([]);
@@ -113,10 +117,15 @@ export default function StudioNexus() {
   const [newNoteContent, setNewNoteContent] = useState("");
   const [savedSuccessId, setSavedSuccessId] = useState<string | null>(null);
 
-  // Load from LocalStorage
+  // Load from LocalStorage & Check WhatsApp Bridge
   useEffect(() => {
     const authSaved = localStorage.getItem(STORAGE_KEYS.AUTH);
     setIsAuthenticated(authSaved === "true");
+
+    fetch("/api/whatsapp/status")
+      .then((res) => res.json())
+      .then((data) => setBridgeConnected(data.ok && data.connected))
+      .catch(() => setBridgeConnected(false));
 
     const chatSaved = localStorage.getItem(STORAGE_KEYS.MESSAGES);
     if (chatSaved) {
@@ -333,40 +342,66 @@ export default function StudioNexus() {
     }
   };
 
-  // DISPATCH TAB: Share on WhatsApp (Mobile Native Share or WhatsApp Web Link)
-  const handleSendToWhatsApp = async () => {
-    if (!dispatchAudioBlob) return;
-
+  // DISPATCH TAB: Direct Automated Voice Note (PTT) dispatch via WhatsApp Bridge (5511995685756)
+  const handleSendToWhatsApp = async (overrideText?: string) => {
+    const textToSend = (overrideText || dispatchText).trim();
     const targetPhone = selectedContact.id === "outro" ? customPhone.replace(/\D/g, "") : selectedContact.phone;
 
-    // Check if navigator.share with files is supported (iOS Safari / Android Chrome)
-    if (navigator.share && navigator.canShare) {
-      try {
-        const audioFile = new File([dispatchAudioBlob], "audio_mensagem.mp3", { type: "audio/mpeg" });
-        if (navigator.canShare({ files: [audioFile] })) {
-          await navigator.share({
-            files: [audioFile],
-            title: "Mensagem de Voz",
-            text: dispatchText.substring(0, 100),
-          });
-          return;
-        }
-      } catch (err: any) {
-        if (err.name !== "AbortError") console.error("Web Share failed:", err);
-      }
+    if (!targetPhone) {
+      alert("Por favor, selecione ou informe o número do WhatsApp de destino.");
+      return;
     }
 
-    // Desktop / Fallback: Download audio and open WhatsApp chat
-    const downloadLink = document.createElement("a");
-    downloadLink.href = dispatchAudioUrl!;
-    downloadLink.download = "mensagem_de_voz.mp3";
-    downloadLink.click();
+    if (!textToSend && !dispatchAudioBlob) {
+      alert("Por favor, digite uma mensagem ou gere o áudio antes de disparar.");
+      return;
+    }
 
-    if (targetPhone) {
-      const cleanTarget = targetPhone.replace(/\D/g, "");
-      window.open(`https://wa.me/${cleanTarget}`, "_blank");
-    } else {
-      window.open("https://web.whatsapp.com", "_blank");
+    setIsSendingWhatsApp(true);
+    setWhatsappResult(null);
+
+    try {
+      let audioBase64: string | undefined = undefined;
+      if (dispatchAudioBlob && !overrideText) {
+        const buffer = await dispatchAudioBlob.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        audioBase64 = btoa(binary);
+      }
+
+      const res = await fetch("/api/whatsapp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: targetPhone,
+          text: textToSend,
+          audioBase64,
+          mood: dispatchMood,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        setWhatsappResult({
+          ok: true,
+          message: `Áudio PTT gravado na hora e entregue com sucesso para ${selectedContact.name || targetPhone} pelo seu WhatsApp (11995685756)!`,
+        });
+      } else {
+        setWhatsappResult({
+          ok: false,
+          message: data.error || "Falha ao enviar áudio pelo WhatsApp.",
+        });
+      }
+    } catch (err: any) {
+      setWhatsappResult({
+        ok: false,
+        message: err.message || "Erro de conexão ao contatar a ponte WhatsApp.",
+      });
+    } finally {
+      setIsSendingWhatsApp(false);
     }
   };
 
@@ -596,9 +631,15 @@ export default function StudioNexus() {
               <h2 className="text-xl font-semibold tracking-tight text-white mb-1.5">
                 Disparo Vocal em Tempo Real
               </h2>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Digite sua mensagem. O sistema sintetiza com sua voz humana e envia diretamente para o WhatsApp.
+              <p className="text-xs text-zinc-400 leading-relaxed mb-3">
+                Digite sua mensagem. O áudio é sintetizado com sua voz clonada e entregue no WhatsApp como gravação ao vivo (PTT nativo com microfone verde).
               </p>
+              <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-zinc-900/80 border border-white/[0.08] text-[10px] text-zinc-300">
+                <span className={`w-1.5 h-1.5 rounded-full ${bridgeConnected ? "bg-emerald-400 animate-pulse" : "bg-emerald-500"}`}></span>
+                <span>Conta WhatsApp: <strong className="text-white">+55 11 99568-5756</strong></span>
+                <span className="text-zinc-500">•</span>
+                <span className="text-emerald-400 font-mono">PTT Nativo Ativo</span>
+              </div>
             </div>
 
             {/* Recipient Selection */}
@@ -684,27 +725,75 @@ export default function StudioNexus() {
                 ))}
               </div>
 
-              {/* Action Button: Synthesize */}
-              <button
-                onClick={handleSynthesizeDispatch}
-                disabled={isSynthesizingDispatch || !dispatchText.trim()}
-                className="w-full py-3.5 apple-button font-medium rounded-2xl text-xs flex items-center justify-center space-x-2 transition disabled:opacity-30 mt-2 shadow-lg"
-              >
-                {isSynthesizingDispatch ? (
-                  <>
-                    <RefreshCw size={14} className="animate-spin" />
-                    <span>Sintetizando com sua voz...</span>
-                  </>
-                ) : (
-                  <>
-                    <Mic size={14} />
-                    <span>Gerar Áudio da Minha Voz</span>
-                  </>
-                )}
-              </button>
+              {/* Action Buttons: Direct Dispatch & Preview */}
+              <div className="space-y-2 pt-1">
+                <button
+                  onClick={() => handleSendToWhatsApp()}
+                  disabled={isSendingWhatsApp || isSynthesizingDispatch || !dispatchText.trim()}
+                  className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center space-x-2.5 transition shadow-xl shadow-emerald-900/30 disabled:opacity-30 active:scale-[0.99]"
+                >
+                  {isSendingWhatsApp ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>Gravando e disparando áudio no WhatsApp...</span>
+                    </>
+                  ) : (
+                    <>
+                      <MessageCircle size={15} />
+                      <span>Disparar Áudio no WhatsApp (+55 11 99568-5756)</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={handleSynthesizeDispatch}
+                  disabled={isSynthesizingDispatch || isSendingWhatsApp || !dispatchText.trim()}
+                  className="w-full py-2.5 rounded-2xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-white/[0.08] font-medium text-xs flex items-center justify-center space-x-2 transition disabled:opacity-30"
+                >
+                  {isSynthesizingDispatch ? (
+                    <>
+                      <RefreshCw size={13} className="animate-spin text-zinc-400" />
+                      <span>Sintetizando prévia da voz...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mic size={13} className="text-zinc-400" />
+                      <span>Ouvir Prévia da Minha Voz Antes</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Status & Feedback Alert */}
+              {whatsappResult && (
+                <div
+                  className={`p-4 rounded-2xl border text-xs flex items-start space-x-3 transition animate-in fade-in duration-200 ${
+                    whatsappResult.ok
+                      ? "bg-emerald-950/40 border-emerald-500/30 text-emerald-200"
+                      : "bg-red-950/40 border-red-500/30 text-red-200"
+                  }`}
+                >
+                  {whatsappResult.ok ? (
+                    <CheckCircle2 size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle size={16} className="text-red-400 shrink-0 mt-0.5" />
+                  )}
+                  <div className="flex-1 leading-relaxed">
+                    <div className="font-medium">
+                      {whatsappResult.ok ? "Transmissão PTT Concluída" : "Aviso de Disparo"}
+                    </div>
+                    <div className="text-[11px] opacity-90 mt-0.5">{whatsappResult.message}</div>
+                    {whatsappResult.ok && (
+                      <div className="text-[10px] text-emerald-400/80 mt-1 font-mono">
+                        Nativo PTT • Microfone verde • Forma de onda gravada ao vivo
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Generated Audio Card (When Ready) */}
+            {/* Generated Audio Card (When Preview Ready) */}
             {dispatchAudioUrl && (
               <div className="apple-card rounded-3xl p-6 border-white/20 bg-zinc-900/80 space-y-4 animate-in fade-in zoom-in-95 duration-200">
                 <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
@@ -712,7 +801,7 @@ export default function StudioNexus() {
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                     <span className="text-xs font-semibold text-white">Áudio Pronto para Envio</span>
                   </div>
-                  <span className="text-[10px] text-zinc-500 font-mono">Alta Fidelidade</span>
+                  <span className="text-[10px] text-zinc-500 font-mono">Alta Fidelidade PTT</span>
                 </div>
 
                 {/* Audio Player Row */}
@@ -737,11 +826,16 @@ export default function StudioNexus() {
                 {/* Dispatch Trigger Buttons */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                   <button
-                    onClick={handleSendToWhatsApp}
-                    className="py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center space-x-2 transition shadow-lg shadow-emerald-900/20"
+                    onClick={() => handleSendToWhatsApp()}
+                    disabled={isSendingWhatsApp}
+                    className="py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center space-x-2 transition shadow-lg shadow-emerald-900/20 disabled:opacity-40"
                   >
-                    <MessageCircle size={15} />
-                    <span>Enviar no WhatsApp</span>
+                    {isSendingWhatsApp ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <MessageCircle size={15} />
+                    )}
+                    <span>Disparar Este Áudio no WhatsApp</span>
                   </button>
 
                   <a
@@ -823,9 +917,20 @@ export default function StudioNexus() {
                           ) : (
                             <>
                               <BookmarkPlus size={13} />
-                              <span>Salvar no Acervo</span>
+                              <span>Salvar</span>
                             </>
                           )}
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setDispatchText(msg.content);
+                            setCurrentTab("dispatch");
+                          }}
+                          className="flex items-center space-x-1.5 text-emerald-400/90 hover:text-emerald-300 transition"
+                        >
+                          <MessageCircle size={13} />
+                          <span>Disparar WhatsApp</span>
                         </button>
                       </div>
                     )}
