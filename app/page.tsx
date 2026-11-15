@@ -99,6 +99,11 @@ export default function VnTtsStudio() {
   const [videoText, setVideoText] = useState("");
   const [videoAudioBlob, setVideoAudioBlob] = useState<Blob | null>(null);
   const [videoAudioUrl, setVideoAudioUrl] = useState<string | null>(null);
+  const [videoEngine, setVideoEngine] = useState<"liveportrait" | "wav2lip">("liveportrait");
+  const [enhanceFace, setEnhanceFace] = useState(true);
+  const [drivingMultiplier, setDrivingMultiplier] = useState(1.0);
+  const [videoEngineUsed, setVideoEngineUsed] = useState<string | null>(null);
+  const [videoFaceEnhanced, setVideoFaceEnhanced] = useState<boolean | null>(null);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [videoProgressStatus, setVideoProgressStatus] = useState("");
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
@@ -582,7 +587,7 @@ export default function VnTtsStudio() {
     setSavedVideoSuccess(false);
 
     try {
-      setVideoProgressStatus("1/3 Preparando retrato e áudio vocal...");
+      setVideoProgressStatus("1/3 Preparando retrato e síntese vocal...");
       let audioBase64: string | undefined = undefined;
       if (videoAudioBlob) {
         const buf = await videoAudioBlob.arrayBuffer();
@@ -592,7 +597,11 @@ export default function VnTtsStudio() {
         audioBase64 = btoa(bin);
       }
 
-      setVideoProgressStatus("2/3 Conectando ao cluster ZeroGPU no Hugging Face...");
+      setVideoProgressStatus(
+        videoEngine === "liveportrait"
+          ? "2/3 Renderizando LivePortrait 3D (Cabeça viva, olhos e dentes 4K)..."
+          : "2/3 Conectando ao cluster ZeroGPU no Hugging Face..."
+      );
       const imageToSend = customPortraitData || selectedPortrait;
 
       const res = await fetch("/api/video/lipsync", {
@@ -602,10 +611,13 @@ export default function VnTtsStudio() {
           image: imageToSend,
           audio: audioBase64,
           text: !audioBase64 ? textToSend : undefined,
+          engine: videoEngine,
+          enhanceFace,
+          drivingMultiplier,
         }),
       });
 
-      setVideoProgressStatus("3/3 Finalizando renderização do movimento labial...");
+      setVideoProgressStatus("3/3 Finalizando codificação e áudio sincronizado...");
       const data = await res.json();
       if (!data.ok) {
         throw new Error(data.error || "Falha ao gerar o vídeo Lip-Sync.");
@@ -613,6 +625,8 @@ export default function VnTtsStudio() {
 
       setGeneratedVideoUrl(data.videoUrl);
       setGeneratedVideoBase64(data.videoBase64 || null);
+      setVideoEngineUsed(data.engineUsed || videoEngine);
+      setVideoFaceEnhanced(Boolean(data.faceEnhanced));
     } catch (err: any) {
       console.error("Erro na geração do vídeo:", err);
       alert(err.message || "Não foi possível gerar o vídeo Lip-Sync no momento.");
@@ -1602,6 +1616,119 @@ export default function VnTtsStudio() {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* 3. Motor & Fidelidade Cinema */}
+                <div className="apple-card rounded-3xl p-5 border-white/10 space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
+                    <div className="flex items-center space-x-2">
+                      <Sparkles size={14} className="text-amber-400" />
+                      <span className="text-xs font-semibold text-white">3. Motor & Fidelidade Cinema</span>
+                    </div>
+                    <span className="text-[10px] text-amber-400/90 font-mono bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                      Ultra Realista
+                    </span>
+                  </div>
+
+                  {/* Engine Selection: LivePortrait vs Wav2Lip */}
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-medium text-zinc-400">Motor de Renderização:</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setVideoEngine("liveportrait")}
+                        className={`p-3 rounded-2xl border text-left transition flex flex-col justify-between ${
+                          videoEngine === "liveportrait"
+                            ? "border-amber-400 bg-amber-500/10 text-white shadow-md shadow-amber-500/10"
+                            : "border-white/10 hover:border-white/20 bg-zinc-900/50 text-zinc-400"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="text-xs font-semibold text-white">LivePortrait</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-400 text-black font-bold">CINEMA</span>
+                        </div>
+                        <p className="text-[10px] text-zinc-400 mt-1.5 leading-snug">
+                          Cabeça 3D viva, olhos piscando, dentes nítidos e zero borrão.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setVideoEngine("wav2lip")}
+                        className={`p-3 rounded-2xl border text-left transition flex flex-col justify-between ${
+                          videoEngine === "wav2lip"
+                            ? "border-amber-400 bg-amber-500/10 text-white shadow-md shadow-amber-500/10"
+                            : "border-white/10 hover:border-white/20 bg-zinc-900/50 text-zinc-400"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="text-xs font-semibold text-white">Modo Express</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono">Wav2Lip</span>
+                        </div>
+                        <p className="text-[10px] text-zinc-400 mt-1.5 leading-snug">
+                          Processamento rápido somente da região labial.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* CodeFormer HD Face Restoration Toggle */}
+                  <div className="flex items-center justify-between p-3 rounded-2xl bg-zinc-900/70 border border-white/[0.06]">
+                    <div className="space-y-0.5">
+                      <div className="text-xs font-medium text-white flex items-center space-x-1.5">
+                        <span>Restauração Facial 4K (CodeFormer)</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-medium">Recomendado</span>
+                      </div>
+                      <div className="text-[10px] text-zinc-400">
+                        Restaura poros, dentes e alta definição cristalina antes de animar.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEnhanceFace(!enhanceFace)}
+                      className={`w-11 h-6 rounded-full transition-colors relative shrink-0 p-0.5 ${
+                        enhanceFace ? "bg-amber-500" : "bg-zinc-800"
+                      }`}
+                    >
+                      <div
+                        className={`w-5 h-5 rounded-full bg-black shadow-md transition-transform ${
+                          enhanceFace ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Driving Multiplier (LivePortrait only) */}
+                  {videoEngine === "liveportrait" && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-zinc-400">Expressividade & Movimento Facial:</span>
+                        <span className="text-amber-400 font-mono font-medium">
+                          {drivingMultiplier === 0.8 ? "Sutil (0.8x)" : drivingMultiplier === 1.0 ? "Natural (1.0x)" : "Expressivo (1.3x)"}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { label: "Sutil", val: 0.8 },
+                          { label: "Natural", val: 1.0 },
+                          { label: "Expressivo", val: 1.3 },
+                        ].map((m) => (
+                          <button
+                            key={m.val}
+                            type="button"
+                            onClick={() => setDrivingMultiplier(m.val)}
+                            className={`py-1.5 rounded-xl border text-[11px] font-medium transition ${
+                              drivingMultiplier === m.val
+                                ? "bg-white text-black border-white"
+                                : "bg-zinc-900/60 text-zinc-400 border-white/10 hover:text-white"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Main Trigger Button */}
                   <button
@@ -1613,12 +1740,12 @@ export default function VnTtsStudio() {
                     {isGeneratingVideo ? (
                       <>
                         <RefreshCw size={14} className="animate-spin text-black" />
-                        <span>{videoProgressStatus || "Processando no ZeroGPU..."}</span>
+                        <span>{videoProgressStatus || "Renderizando vídeo cinema..."}</span>
                       </>
                     ) : (
                       <>
                         <Clapperboard size={14} className="text-black" />
-                        <span>Gerar Vídeo com Sincronia Labial</span>
+                        <span>Gerar Vídeo Realista Nível Cinema</span>
                       </>
                     )}
                   </button>
@@ -1645,6 +1772,19 @@ export default function VnTtsStudio() {
                   <div className="flex-1 flex items-center justify-center my-4">
                     {generatedVideoUrl ? (
                       <div className="w-full rounded-2xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
+                        {/* Cinema Badge */}
+                        <div className="absolute top-2.5 left-2.5 flex items-center space-x-1.5 z-10">
+                          <span className="px-2 py-0.5 rounded-full bg-black/80 backdrop-blur-md border border-white/10 text-[9px] font-mono text-amber-300 flex items-center space-x-1">
+                            <Sparkles size={10} className="text-amber-400" />
+                            <span>{videoEngineUsed === "liveportrait" ? "LivePortrait 3D (736x1104)" : "Wav2Lip"}</span>
+                          </span>
+                          {videoFaceEnhanced && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-950/80 backdrop-blur-md border border-emerald-500/30 text-[9px] font-mono text-emerald-300">
+                              4K Restaurado
+                            </span>
+                          )}
+                        </div>
+
                         <video
                           src={generatedVideoUrl}
                           controls

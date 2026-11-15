@@ -14,7 +14,14 @@ export async function POST(req: NextRequest) {
   const tempFilesToClean: string[] = [];
   try {
     const body = await req.json();
-    const { image, audio, text, mood } = body;
+    const {
+      image,
+      audio,
+      text,
+      engine = "liveportrait",
+      enhanceFace = true,
+      drivingMultiplier = 1.0,
+    } = body;
 
     if (!image) {
       return NextResponse.json(
@@ -94,29 +101,91 @@ export async function POST(req: NextRequest) {
       tempFilesToClean.push(imageFilePath);
     }
 
-    // 3. Connect to Hugging Face ZeroGPU Space and Run Inference
     const { Client, handle_file } = await import("@gradio/client");
     const connectOptions: any = {};
     if (HF_TOKEN) {
       connectOptions.token = HF_TOKEN as `hf_${string}`;
     }
-    const client = await Client.connect("pragnakalp/Wav2lip-ZeroGPU", connectOptions);
 
-    const result: any = await client.predict("/run_infrence", {
-      input_image: handle_file(imageFilePath),
-      input_audio: handle_file(audioFilePath),
-    });
+    // 3. Optional Face Enhancement (CodeFormer HD 2x Upscaling)
+    let faceWasEnhanced = false;
+    if (enhanceFace) {
+      try {
+        const codeFormerClient = await Client.connect("sczhou/CodeFormer", connectOptions);
+        const rawFaceBuf = fs.readFileSync(imageFilePath);
+        const faceFile = new File([rawFaceBuf], "portrait.jpg", { type: "image/jpeg" });
+        const restoreResult: any = await codeFormerClient.predict("/inference", {
+          image: faceFile,
+          face_align: true,
+          background_enhance: true,
+          face_upsample: true,
+          upscale: 2,
+          codeformer_fidelity: 0.7,
+        });
 
-    const videoData = result?.data?.[0]?.video;
-    if (!videoData?.url) {
+        const restoredUrl = restoreResult?.data?.[0]?.url;
+        if (restoredUrl) {
+          const resImg = await fetch(restoredUrl);
+          if (resImg.ok) {
+            const restoredBuf = Buffer.from(await resImg.arrayBuffer());
+            const enhancedPath = path.join("/tmp", `lip_enhanced_${Date.now()}.png`);
+            fs.writeFileSync(enhancedPath, restoredBuf);
+            imageFilePath = enhancedPath;
+            tempFilesToClean.push(enhancedPath);
+            faceWasEnhanced = true;
+          }
+        }
+      } catch (enhErr) {
+        console.warn("Aviso: CodeFormer não pôde ser aplicado, mantendo imagem original:", enhErr);
+      }
+    }
+
+    // 4. Generate Video: LivePortrait (Primary) or Wav2Lip (Fallback)
+    let finalVideoUrl = "";
+    let actualEngine = engine;
+
+    if (engine === "liveportrait") {
+      try {
+        const lpClient = await Client.connect("FabrizioBassanesi/liveportrait-audio", connectOptions);
+        const rawImg = fs.readFileSync(imageFilePath);
+        const rawAudio = fs.readFileSync(audioFilePath);
+        const imgFile = new File([rawImg], "portrait.jpg", { type: "image/jpeg" });
+        const audioFile = new File([rawAudio], "speech.mp3", { type: "audio/mpeg" });
+
+        const lpResult: any = await lpClient.predict("/animate", {
+          image_path: imgFile,
+          audio_path: audioFile,
+          driving_multiplier: Number(drivingMultiplier) || 1.0,
+          cfg_scale: 3.0,
+        });
+
+        finalVideoUrl = lpResult?.data?.[0]?.video?.url || "";
+      } catch (lpErr: any) {
+        console.warn("LivePortrait falhou ou tempo esgotado, acionando fallback Wav2Lip:", lpErr?.message);
+        actualEngine = "wav2lip";
+      }
+    }
+
+    if (!finalVideoUrl) {
+      // Wav2Lip Fallback
+      actualEngine = "wav2lip";
+      const w2lClient = await Client.connect("pragnakalp/Wav2lip-ZeroGPU", connectOptions);
+      const w2lResult: any = await w2lClient.predict("/run_infrence", {
+        input_image: handle_file(imageFilePath),
+        input_audio: handle_file(audioFilePath),
+      });
+      finalVideoUrl = w2lResult?.data?.[0]?.video?.url || "";
+    }
+
+    if (!finalVideoUrl) {
       return NextResponse.json(
         { ok: false, error: "Hugging Face ZeroGPU não retornou o vídeo final." },
         { status: 502 }
       );
     }
 
-    // 4. Download video from HF into Buffer to return base64
-    const vidResp = await fetch(videoData.url);
+    // 5. Download Video from HF into Buffer to return base64
+    const vidResp = await fetch(finalVideoUrl);
     let videoBase64 = "";
     if (vidResp.ok) {
       const vidBuffer = Buffer.from(await vidResp.arrayBuffer());
@@ -125,8 +194,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      videoUrl: videoData.url,
+      videoUrl: finalVideoUrl,
       videoBase64: videoBase64 ? `data:video/mp4;base64,${videoBase64}` : undefined,
+      engineUsed: actualEngine,
+      faceEnhanced: faceWasEnhanced,
     });
   } catch (err: any) {
     console.error("Lip-Sync error:", err);
