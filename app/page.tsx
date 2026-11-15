@@ -18,9 +18,11 @@ import {
   User,
   Volume2,
   RefreshCw,
-  FolderOpen,
-  MessageSquare,
-  Radio,
+  Share2,
+  Phone,
+  MessageCircle,
+  Download,
+  CheckCircle2,
 } from "lucide-react";
 
 interface VoiceAnchor {
@@ -55,52 +57,12 @@ const STORAGE_KEYS = {
   RECORDS: "nexus_apple_records_v1",
 };
 
-// Default high-grade voice reference samples
-const initialVoiceAnchors: VoiceAnchor[] = [
-  {
-    id: "anchor_01",
-    name: "Tom Firme & Decisão",
-    mood: "firme",
-    accent: "sp",
-    audioUrl: "",
-    duration: "0:06",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "anchor_02",
-    name: "Energia & Entusiasmo",
-    mood: "empolgado",
-    accent: "sp",
-    audioUrl: "",
-    duration: "0:05",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "anchor_03",
-    name: "Cadência Descontraída",
-    mood: "descontraido",
-    accent: "carioca",
-    audioUrl: "",
-    duration: "0:07",
-    createdAt: new Date().toISOString(),
-  },
-];
-
-const initialRecords: RecordNote[] = [
-  {
-    id: "rec_01",
-    title: "Diretrizes de Identidade Vocal",
-    content: "Articulação firme em negociações e cadência solta em momentos de descontração. Preservar respiração natural.",
-    category: "voz",
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "rec_02",
-    title: "Planejamento Estratégico 2026",
-    content: "Estruturação de novos ativos digitais com interfaces de alta fidelidade e automação contínua.",
-    category: "ideia",
-    createdAt: new Date().toISOString(),
-  },
+// Preset Contacts
+const PRESET_CONTACTS = [
+  { id: "mae", name: "Mãe", phone: "5511976909265", label: "Mãe", icon: "👩‍👦" },
+  { id: "tawan", name: "Tawan", phone: "66832024232", label: "Tawan (Namorada)", icon: "💖" },
+  { id: "nina", name: "Nina", phone: "5511910765838", label: "Nina", icon: "👧" },
+  { id: "outro", name: "Outro", phone: "", label: "Outro Número", icon: "📱" },
 ];
 
 export default function StudioNexus() {
@@ -110,8 +72,8 @@ export default function StudioNexus() {
   const [loginPass, setLoginPass] = useState("");
   const [loginError, setLoginError] = useState("");
 
-  // Navigation
-  const [currentTab, setCurrentTab] = useState<"assistant" | "voice" | "records">("assistant");
+  // Navigation: assistant | dispatch | voice | records
+  const [currentTab, setCurrentTab] = useState<"assistant" | "dispatch" | "voice" | "records">("dispatch");
 
   // Chat
   const [messages, setMessages] = useState<Message[]>([]);
@@ -119,18 +81,27 @@ export default function StudioNexus() {
   const [isReplying, setIsReplying] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // Audio Playback
+  // Audio Playback in Chat
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Dispatch Tab (Disparo Vocal)
+  const [dispatchText, setDispatchText] = useState("");
+  const [selectedContact, setSelectedContact] = useState(PRESET_CONTACTS[0]);
+  const [customPhone, setCustomPhone] = useState("");
+  const [dispatchMood, setDispatchMood] = useState<string>("sp");
+  const [isSynthesizingDispatch, setIsSynthesizingDispatch] = useState(false);
+  const [dispatchAudioBlob, setDispatchAudioBlob] = useState<Blob | null>(null);
+  const [dispatchAudioUrl, setDispatchAudioUrl] = useState<string | null>(null);
+  const [isPlayingDispatchAudio, setIsPlayingDispatchAudio] = useState(false);
+  const dispatchAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
+
   // Voice Lab
   const [voiceAnchors, setVoiceAnchors] = useState<VoiceAnchor[]>([]);
-  const [selectedAnchorId, setSelectedAnchorId] = useState<string | null>(null);
   const [uploadName, setUploadName] = useState("");
   const [uploadMood, setUploadMood] = useState<VoiceAnchor["mood"]>("firme");
   const [uploadAccent, setUploadAccent] = useState<VoiceAnchor["accent"]>("sp");
-  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Records / Acervo
@@ -144,11 +115,9 @@ export default function StudioNexus() {
 
   // Load from LocalStorage
   useEffect(() => {
-    // Auth
     const authSaved = localStorage.getItem(STORAGE_KEYS.AUTH);
     setIsAuthenticated(authSaved === "true");
 
-    // Chat
     const chatSaved = localStorage.getItem(STORAGE_KEYS.MESSAGES);
     if (chatSaved) {
       try {
@@ -160,28 +129,22 @@ export default function StudioNexus() {
       setMessages(getDefaultMessages());
     }
 
-    // Voice Anchors
     const voiceSaved = localStorage.getItem(STORAGE_KEYS.VOICE_ANCHORS);
     if (voiceSaved) {
       try {
         setVoiceAnchors(JSON.parse(voiceSaved));
       } catch (e) {
-        setVoiceAnchors(initialVoiceAnchors);
+        setVoiceAnchors([]);
       }
-    } else {
-      setVoiceAnchors(initialVoiceAnchors);
     }
 
-    // Records
     const recsSaved = localStorage.getItem(STORAGE_KEYS.RECORDS);
     if (recsSaved) {
       try {
         setRecords(JSON.parse(recsSaved));
       } catch (e) {
-        setRecords(initialRecords);
+        setRecords([]);
       }
-    } else {
-      setRecords(initialRecords);
     }
   }, []);
 
@@ -190,7 +153,7 @@ export default function StudioNexus() {
       {
         id: "msg_intro",
         role: "assistant",
-        content: "Studio Nexus ativo. Sistema calibrado para raciocínio analítico, síntese de voz e gestão de acervo. O que deseja explorar hoje?",
+        content: "Studio Nexus ativo. Sistema calibrado para síntese de voz nativa, raciocínio e disparo direto. Como posso ajudar?",
         createdAt: new Date().toISOString(),
       },
     ];
@@ -282,7 +245,7 @@ export default function StudioNexus() {
     }
   };
 
-  // Play Speech (TTS)
+  // Play Speech (TTS in Chat)
   const handlePlayVoice = async (msgId: string, text: string) => {
     if (playingMessageId === msgId) {
       if (activeAudioRef.current) {
@@ -322,19 +285,89 @@ export default function StudioNexus() {
     }
   };
 
-  // Save Assistant Message to Records
-  const handleSaveToRecords = (content: string, id: string) => {
-    const titleSnippet = content.substring(0, 42).replace(/[*#\n]/g, " ").trim() + "...";
-    const newNote: RecordNote = {
-      id: `rec_${Date.now()}`,
-      title: titleSnippet,
-      content,
-      category: "pesquisa",
-      createdAt: new Date().toISOString(),
-    };
-    setRecords((prev) => [newNote, ...prev]);
-    setSavedSuccessId(id);
-    setTimeout(() => setSavedSuccessId(null), 2500);
+  // DISPATCH TAB: Generate Audio with My Voice
+  const handleSynthesizeDispatch = async () => {
+    if (!dispatchText.trim() || isSynthesizingDispatch) return;
+
+    setIsSynthesizingDispatch(true);
+    setDispatchAudioBlob(null);
+    setDispatchAudioUrl(null);
+    setIsPlayingDispatchAudio(false);
+
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: dispatchText.trim(), mood: dispatchMood }),
+      });
+
+      if (!res.ok) throw new Error("Falha na síntese de áudio");
+
+      const blob = await res.blob();
+      const audioUrl = URL.createObjectURL(blob);
+
+      setDispatchAudioBlob(blob);
+      setDispatchAudioUrl(audioUrl);
+    } catch (err) {
+      console.error(err);
+      alert("Não foi possível gerar a síntese vocal no momento.");
+    } finally {
+      setIsSynthesizingDispatch(false);
+    }
+  };
+
+  // DISPATCH TAB: Play / Pause generated dispatch audio
+  const handleToggleDispatchAudio = () => {
+    if (!dispatchAudioUrl) return;
+
+    if (isPlayingDispatchAudio && dispatchAudioPlayerRef.current) {
+      dispatchAudioPlayerRef.current.pause();
+      setIsPlayingDispatchAudio(false);
+    } else {
+      if (!dispatchAudioPlayerRef.current) {
+        dispatchAudioPlayerRef.current = new Audio(dispatchAudioUrl);
+        dispatchAudioPlayerRef.current.onended = () => setIsPlayingDispatchAudio(false);
+      }
+      dispatchAudioPlayerRef.current.play();
+      setIsPlayingDispatchAudio(true);
+    }
+  };
+
+  // DISPATCH TAB: Share on WhatsApp (Mobile Native Share or WhatsApp Web Link)
+  const handleSendToWhatsApp = async () => {
+    if (!dispatchAudioBlob) return;
+
+    const targetPhone = selectedContact.id === "outro" ? customPhone.replace(/\D/g, "") : selectedContact.phone;
+
+    // Check if navigator.share with files is supported (iOS Safari / Android Chrome)
+    if (navigator.share && navigator.canShare) {
+      try {
+        const audioFile = new File([dispatchAudioBlob], "audio_mensagem.mp3", { type: "audio/mpeg" });
+        if (navigator.canShare({ files: [audioFile] })) {
+          await navigator.share({
+            files: [audioFile],
+            title: "Mensagem de Voz",
+            text: dispatchText.substring(0, 100),
+          });
+          return;
+        }
+      } catch (err: any) {
+        if (err.name !== "AbortError") console.error("Web Share failed:", err);
+      }
+    }
+
+    // Desktop / Fallback: Download audio and open WhatsApp chat
+    const downloadLink = document.createElement("a");
+    downloadLink.href = dispatchAudioUrl!;
+    downloadLink.download = "mensagem_de_voz.mp3";
+    downloadLink.click();
+
+    if (targetPhone) {
+      const cleanTarget = targetPhone.replace(/\D/g, "");
+      window.open(`https://wa.me/${cleanTarget}`, "_blank");
+    } else {
+      window.open("https://web.whatsapp.com", "_blank");
+    }
   };
 
   // Voice Lab: Upload Audio File
@@ -342,7 +375,6 @@ export default function StudioNexus() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setIsUploading(true);
     const audioUrl = URL.createObjectURL(file);
     const newAnchor: VoiceAnchor = {
       id: `anchor_${Date.now()}`,
@@ -356,7 +388,6 @@ export default function StudioNexus() {
 
     setVoiceAnchors((prev) => [newAnchor, ...prev]);
     setUploadName("");
-    setIsUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -386,6 +417,20 @@ export default function StudioNexus() {
     setRecords((prev) => prev.filter((r) => r.id !== id));
   };
 
+  const handleSaveToRecords = (content: string, id: string) => {
+    const titleSnippet = content.substring(0, 42).replace(/[*#\n]/g, " ").trim() + "...";
+    const newNote: RecordNote = {
+      id: `rec_${Date.now()}`,
+      title: titleSnippet,
+      content,
+      category: "pesquisa",
+      createdAt: new Date().toISOString(),
+    };
+    setRecords((prev) => [newNote, ...prev]);
+    setSavedSuccessId(id);
+    setTimeout(() => setSavedSuccessId(null), 2500);
+  };
+
   const filteredRecords = records.filter((r) => {
     const matchCat = selectedCategory === "todos" || r.category === selectedCategory;
     const matchSearch =
@@ -408,12 +453,10 @@ export default function StudioNexus() {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-black flex flex-col justify-between p-6 sm:p-12 relative overflow-hidden">
-        {/* Subtle Ambient Vignette */}
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-zinc-900/40 via-black to-black pointer-events-none"></div>
 
         <div className="flex-1 flex items-center justify-center relative z-10">
           <div className="apple-glass rounded-3xl w-full max-w-sm p-8 sm:p-10 shadow-2xl">
-            {/* Minimal Brand Mark */}
             <div className="text-center mb-8">
               <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-white/10 flex items-center justify-center mx-auto mb-4 text-white font-semibold text-sm tracking-tight shadow-lg">
                 VN
@@ -489,11 +532,22 @@ export default function StudioNexus() {
             <span className="text-xs font-medium tracking-tight text-white">Studio Nexus</span>
           </div>
 
-          {/* Segmented Control Pill */}
+          {/* Segmented Control Pill with 4 Tabs */}
           <nav className="flex items-center p-1 rounded-full bg-zinc-900/80 border border-white/[0.08] text-xs">
             <button
+              onClick={() => setCurrentTab("dispatch")}
+              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 flex items-center space-x-1.5 ${
+                currentTab === "dispatch"
+                  ? "bg-white text-black font-medium shadow-sm"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              <span>Disparo Vocal</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            </button>
+            <button
               onClick={() => setCurrentTab("assistant")}
-              className={`px-4 py-1.5 rounded-full transition-all duration-200 ${
+              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 ${
                 currentTab === "assistant"
                   ? "bg-white text-black font-medium shadow-sm"
                   : "text-zinc-400 hover:text-white"
@@ -503,18 +557,17 @@ export default function StudioNexus() {
             </button>
             <button
               onClick={() => setCurrentTab("voice")}
-              className={`px-4 py-1.5 rounded-full transition-all duration-200 flex items-center space-x-1.5 ${
+              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 ${
                 currentTab === "voice"
                   ? "bg-white text-black font-medium shadow-sm"
                   : "text-zinc-400 hover:text-white"
               }`}
             >
-              <span>Voz Real</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              Voz Real
             </button>
             <button
               onClick={() => setCurrentTab("records")}
-              className={`px-4 py-1.5 rounded-full transition-all duration-200 ${
+              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 ${
                 currentTab === "records"
                   ? "bg-white text-black font-medium shadow-sm"
                   : "text-zinc-400 hover:text-white"
@@ -536,10 +589,178 @@ export default function StudioNexus() {
 
       {/* Main View Area */}
       <main className="max-w-4xl mx-auto w-full px-5 py-8 flex-1 flex flex-col justify-between">
-        {/* TAB 1: ASSISTENTE CONVERSACIONAL */}
+        {/* TAB 1: DISPARO VOCAL (VOZ EM TEMPO REAL COM ENVIO WHATSAPP) */}
+        {currentTab === "dispatch" && (
+          <div className="max-w-2xl mx-auto w-full space-y-6 py-2">
+            <div className="text-center max-w-md mx-auto">
+              <h2 className="text-xl font-semibold tracking-tight text-white mb-1.5">
+                Disparo Vocal em Tempo Real
+              </h2>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Digite sua mensagem. O sistema sintetiza com sua voz humana e envia diretamente para o WhatsApp.
+              </p>
+            </div>
+
+            {/* Recipient Selection */}
+            <div className="apple-glass rounded-3xl p-5 space-y-3">
+              <label className="text-[11px] font-medium text-zinc-400 block px-1">
+                Destinatário no WhatsApp
+              </label>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {PRESET_CONTACTS.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => setSelectedContact(c)}
+                    className={`p-2.5 rounded-2xl border text-left transition flex items-center space-x-2 ${
+                      selectedContact.id === c.id
+                        ? "bg-white text-black border-white font-medium shadow-md"
+                        : "bg-zinc-900/50 text-zinc-300 border-white/[0.06] hover:bg-zinc-800"
+                    }`}
+                  >
+                    <span className="text-base">{c.icon}</span>
+                    <span className="text-xs truncate">{c.name}</span>
+                  </button>
+                ))}
+              </div>
+
+              {selectedContact.id === "outro" && (
+                <div className="pt-2">
+                  <input
+                    type="tel"
+                    value={customPhone}
+                    onChange={(e) => setCustomPhone(e.target.value)}
+                    placeholder="DDD + Número (ex: 11999998888)"
+                    className="w-full bg-zinc-900/80 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white/30"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Text & Tone Input Card */}
+            <div className="apple-glass rounded-3xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-medium text-zinc-400">
+                  O que você quer falar?
+                </label>
+
+                {/* Mood Select */}
+                <select
+                  value={dispatchMood}
+                  onChange={(e) => setDispatchMood(e.target.value)}
+                  className="bg-zinc-900/80 border border-white/10 rounded-xl px-3 py-1.5 text-[11px] text-zinc-300 focus:outline-none"
+                >
+                  <option value="sp">Padrão São Paulo</option>
+                  <option value="firme">Firme / Autoridade</option>
+                  <option value="calmo">Calmo / Afeto</option>
+                  <option value="empolgado">Empolgado / Energia</option>
+                  <option value="carioca">Carioca</option>
+                  <option value="baiano">Baiano</option>
+                </select>
+              </div>
+
+              <textarea
+                rows={3}
+                value={dispatchText}
+                onChange={(e) => setDispatchText(e.target.value)}
+                placeholder="Digite sua fala como você falaria... (ex: 'Oi, tudo bem? Tô saindo agora do estúdio e te ligo em 10 minutos...')"
+                className="w-full bg-zinc-900/70 border border-white/10 rounded-2xl p-4 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 transition resize-none leading-relaxed"
+              />
+
+              {/* Quick Preset Phrases */}
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  "Tô na correria aqui, já já te ligo!",
+                  "Oi amor, bom dia! Como você tá?",
+                  "Recebi aqui, tô analisando e te aviso.",
+                ].map((phrase, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setDispatchText(phrase)}
+                    className="px-2.5 py-1 rounded-full bg-zinc-900/60 hover:bg-zinc-800 border border-white/[0.04] text-[10px] text-zinc-400 hover:text-white transition"
+                  >
+                    {phrase}
+                  </button>
+                ))}
+              </div>
+
+              {/* Action Button: Synthesize */}
+              <button
+                onClick={handleSynthesizeDispatch}
+                disabled={isSynthesizingDispatch || !dispatchText.trim()}
+                className="w-full py-3.5 apple-button font-medium rounded-2xl text-xs flex items-center justify-center space-x-2 transition disabled:opacity-30 mt-2 shadow-lg"
+              >
+                {isSynthesizingDispatch ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>Sintetizando com sua voz...</span>
+                  </>
+                ) : (
+                  <>
+                    <Mic size={14} />
+                    <span>Gerar Áudio da Minha Voz</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Generated Audio Card (When Ready) */}
+            {dispatchAudioUrl && (
+              <div className="apple-card rounded-3xl p-6 border-white/20 bg-zinc-900/80 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
+                  <div className="flex items-center space-x-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="text-xs font-semibold text-white">Áudio Pronto para Envio</span>
+                  </div>
+                  <span className="text-[10px] text-zinc-500 font-mono">Alta Fidelidade</span>
+                </div>
+
+                {/* Audio Player Row */}
+                <div className="flex items-center space-x-4 bg-black/40 p-3 rounded-2xl border border-white/[0.04]">
+                  <button
+                    onClick={handleToggleDispatchAudio}
+                    className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center transition shadow-md hover:scale-105 active:scale-95"
+                  >
+                    {isPlayingDispatchAudio ? <Pause size={16} /> : <Play size={16} className="ml-0.5" />}
+                  </button>
+
+                  <div className="flex-1">
+                    <div className="text-xs font-medium text-white truncate">{dispatchText}</div>
+                    <div className="text-[11px] text-zinc-400 mt-0.5 flex items-center space-x-2">
+                      <span>Voz Humana</span>
+                      <span>•</span>
+                      <span className="capitalize">{dispatchMood}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Dispatch Trigger Buttons */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <button
+                    onClick={handleSendToWhatsApp}
+                    className="py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center space-x-2 transition shadow-lg shadow-emerald-900/20"
+                  >
+                    <MessageCircle size={15} />
+                    <span>Enviar no WhatsApp</span>
+                  </button>
+
+                  <a
+                    href={dispatchAudioUrl}
+                    download="mensagem_vocal.mp3"
+                    className="py-3 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs flex items-center justify-center space-x-2 transition border border-white/[0.06]"
+                  >
+                    <Download size={14} />
+                    <span>Baixar MP3</span>
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 2: ASSISTENTE CONVERSACIONAL */}
         {currentTab === "assistant" && (
           <div className="flex flex-col flex-1 max-w-3xl mx-auto w-full space-y-6">
-            {/* Quick Inspiration Pills */}
             <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
               {[
                 "Elabore uma proposta de consultoria sênior",
@@ -556,7 +777,6 @@ export default function StudioNexus() {
               ))}
             </div>
 
-            {/* Messages Feed */}
             <div className="flex-1 space-y-6 overflow-y-auto py-4 min-h-[420px] max-h-[580px] pr-1">
               {messages.map((msg) => (
                 <div
@@ -574,7 +794,6 @@ export default function StudioNexus() {
                   >
                     <div className="whitespace-pre-wrap">{msg.content}</div>
 
-                    {/* Assistant Actions: Audio & Bookmark */}
                     {msg.role === "assistant" && (
                       <div className="mt-3 pt-2.5 border-t border-white/[0.06] flex items-center space-x-3 text-[11px]">
                         <button
@@ -625,7 +844,6 @@ export default function StudioNexus() {
               <div ref={chatBottomRef} />
             </div>
 
-            {/* Apple Minimal Input Bar */}
             <form
               onSubmit={(e) => handleSendMessage(e)}
               className="sticky bottom-4 w-full flex items-center bg-zinc-900/80 backdrop-blur-xl border border-white/10 rounded-2xl p-1.5 shadow-2xl focus-within:border-white/30 transition"
@@ -648,10 +866,9 @@ export default function StudioNexus() {
           </div>
         )}
 
-        {/* TAB 2: LABORATÓRIO VOCAL (VOICE ANCHORS) */}
+        {/* TAB 3: LABORATÓRIO VOCAL (VOICE ANCHORS) */}
         {currentTab === "voice" && (
           <div className="max-w-3xl mx-auto w-full space-y-8 py-2">
-            {/* Header Description */}
             <div className="text-center max-w-xl mx-auto">
               <h2 className="text-xl font-semibold tracking-tight text-white mb-2">
                 Âncoras de Voz Real
@@ -661,7 +878,6 @@ export default function StudioNexus() {
               </p>
             </div>
 
-            {/* Upload & Add Anchor Card */}
             <div className="apple-glass rounded-3xl p-6 sm:p-8 space-y-5">
               <div className="text-xs font-semibold text-white tracking-tight flex items-center space-x-2">
                 <Mic size={15} className="text-emerald-400" />
@@ -709,7 +925,6 @@ export default function StudioNexus() {
                 </div>
               </div>
 
-              {/* Upload Drop Button */}
               <div className="pt-1 flex items-center justify-between">
                 <input
                   type="file"
@@ -733,7 +948,6 @@ export default function StudioNexus() {
               </div>
             </div>
 
-            {/* Gallery of Voice Anchors */}
             <div className="space-y-3">
               <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider px-1">
                 Galeria de Referências Vocais
@@ -778,10 +992,9 @@ export default function StudioNexus() {
           </div>
         )}
 
-        {/* TAB 3: ACERVO (RECORDS) */}
+        {/* TAB 4: ACERVO (RECORDS) */}
         {currentTab === "records" && (
           <div className="max-w-3xl mx-auto w-full space-y-6 py-2">
-            {/* Top Bar Filter & Action */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
               <div className="flex items-center space-x-2">
                 {["todos", "ideia", "voz", "pesquisa"].map((cat) => (
@@ -821,7 +1034,6 @@ export default function StudioNexus() {
               </div>
             </div>
 
-            {/* Records List */}
             {filteredRecords.length === 0 ? (
               <div className="apple-glass rounded-3xl p-12 text-center text-xs text-zinc-500">
                 Nenhum registro encontrado no acervo.
