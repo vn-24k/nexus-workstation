@@ -30,7 +30,8 @@ export interface SyncEvent {
   createdAt: string;
 }
 
-// Initial seed data
+const DB_FILE = path.join("/tmp", "nexus_db_store.json");
+
 const initialRecords: RecordItem[] = [
   {
     id: "rec_001",
@@ -59,22 +60,13 @@ const initialRecords: RecordItem[] = [
     metadata: { vaultRepo: "vns24k/vault-backup", sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
     createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
   },
-  {
-    id: "rec_004",
-    title: "Diretrizes de Acordo de Prestação de Serviços",
-    category: "documento",
-    content: "Minuta contratual com cláusulas de entrega contínua, responsabilidade técnica e escopo fechado.",
-    status: "em_analise",
-    metadata: { paginas: 12, versao: "2.4" },
-    createdAt: new Date(Date.now() - 3600000 * 48).toISOString(),
-  },
 ];
 
 const initialMessages: BotMessage[] = [
   {
     id: "msg_init_1",
     role: "bot",
-    content: "Nexus Core online. Sistema operacional e banco de dados prontos para comandos. Como posso ajudar agora?",
+    content: "Nexus Core online com motor neural ativo. Como posso ajudar com seus dados, código ou pesquisas hoje?",
     createdAt: new Date(Date.now() - 3600000).toISOString(),
   },
 ];
@@ -91,27 +83,54 @@ const initialSyncEvents: SyncEvent[] = [
   },
 ];
 
-// In-Memory store with optional file fallback
-declare global {
-  var __nexus_db: {
-    records: RecordItem[];
-    messages: BotMessage[];
-    syncEvents: SyncEvent[];
-  } | undefined;
+interface DBState {
+  records: RecordItem[];
+  messages: BotMessage[];
+  syncEvents: SyncEvent[];
 }
 
-if (!global.__nexus_db) {
-  global.__nexus_db = {
+function loadFromDisk(): DBState {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.records)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error("Error reading DB file from /tmp:", e);
+  }
+  return {
     records: [...initialRecords],
     messages: [...initialMessages],
     syncEvents: [...initialSyncEvents],
   };
 }
 
+function saveToDisk(state: DBState) {
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2), "utf-8");
+  } catch (e) {
+    console.error("Error saving DB file to /tmp:", e);
+  }
+}
+
+// Global in-memory cache synchronized with /tmp disk file
+declare global {
+  var __nexus_db: DBState | undefined;
+}
+
+if (!global.__nexus_db) {
+  global.__nexus_db = loadFromDisk();
+}
+
 export const db = {
   // Records
   getRecords: (category?: string, search?: string): RecordItem[] => {
-    let list = global.__nexus_db!.records;
+    let state = global.__nexus_db || loadFromDisk();
+    let list = state.records;
+
     if (category && category !== "todos") {
       list = list.filter((r) => r.category === category);
     }
@@ -129,29 +148,49 @@ export const db = {
   },
 
   addRecord: (record: Omit<RecordItem, "id" | "createdAt">): RecordItem => {
+    if (!global.__nexus_db) global.__nexus_db = loadFromDisk();
+
     const newItem: RecordItem = {
       ...record,
-      id: `rec_${Date.now()}`,
+      id: `rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       createdAt: new Date().toISOString(),
     };
-    global.__nexus_db!.records.unshift(newItem);
+    global.__nexus_db.records.unshift(newItem);
+    saveToDisk(global.__nexus_db);
     return newItem;
   },
 
   deleteRecord: (id: string): boolean => {
-    const initialLen = global.__nexus_db!.records.length;
-    global.__nexus_db!.records = global.__nexus_db!.records.filter(
-      (r) => r.id !== id
-    );
-    return global.__nexus_db!.records.length < initialLen;
+    if (!global.__nexus_db) global.__nexus_db = loadFromDisk();
+
+    const initialLen = global.__nexus_db.records.length;
+    global.__nexus_db.records = global.__nexus_db.records.filter((r) => r.id !== id);
+    const deleted = global.__nexus_db.records.length < initialLen;
+    if (deleted) saveToDisk(global.__nexus_db);
+    return deleted;
+  },
+
+  // Bulk sync from client storage
+  syncFromClient: (clientRecords: RecordItem[]) => {
+    if (!global.__nexus_db) global.__nexus_db = loadFromDisk();
+    const existingIds = new Set(global.__nexus_db.records.map((r) => r.id));
+    for (const cr of clientRecords) {
+      if (!existingIds.has(cr.id)) {
+        global.__nexus_db.records.push(cr);
+      }
+    }
+    saveToDisk(global.__nexus_db);
   },
 
   // Messages
   getMessages: (): BotMessage[] => {
-    return [...global.__nexus_db!.messages];
+    if (!global.__nexus_db) global.__nexus_db = loadFromDisk();
+    return [...global.__nexus_db.messages];
   },
 
   addMessage: (role: "user" | "bot", content: string, command?: string, data?: any): BotMessage => {
+    if (!global.__nexus_db) global.__nexus_db = loadFromDisk();
+
     const msg: BotMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       role,
@@ -160,42 +199,62 @@ export const db = {
       data,
       createdAt: new Date().toISOString(),
     };
-    global.__nexus_db!.messages.push(msg);
+    global.__nexus_db.messages.push(msg);
+    saveToDisk(global.__nexus_db);
     return msg;
+  },
+
+  clearMessages: () => {
+    if (!global.__nexus_db) global.__nexus_db = loadFromDisk();
+    global.__nexus_db.messages = [
+      {
+        id: `msg_init_${Date.now()}`,
+        role: "bot",
+        content: "Histórico reiniciado. O que você gostaria de explorar ou registrar agora?",
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    saveToDisk(global.__nexus_db);
   },
 
   // Sync Events
   getSyncEvents: (): SyncEvent[] => {
-    return [...global.__nexus_db!.syncEvents].sort(
+    if (!global.__nexus_db) global.__nexus_db = loadFromDisk();
+    return [...global.__nexus_db.syncEvents].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   },
 
   triggerSync: (snapshotName?: string): SyncEvent => {
+    if (!global.__nexus_db) global.__nexus_db = loadFromDisk();
+
     const name = snapshotName || `vault_snapshot_${Date.now()}.zip`;
     const newEvent: SyncEvent = {
       id: `sync_${Date.now()}`,
       snapshotName: name,
       hash: Math.random().toString(16).substring(2, 18) + Math.random().toString(16).substring(2, 18),
       status: "sincronizado",
-      fileCount: global.__nexus_db!.records.length + 8,
-      totalSizeMb: parseFloat(((global.__nexus_db!.records.length * 0.45) + 3.2).toFixed(2)),
+      fileCount: global.__nexus_db.records.length + 8,
+      totalSizeMb: parseFloat(((global.__nexus_db.records.length * 0.45) + 3.2).toFixed(2)),
       createdAt: new Date().toISOString(),
     };
-    global.__nexus_db!.syncEvents.unshift(newEvent);
+    global.__nexus_db.syncEvents.unshift(newEvent);
+    saveToDisk(global.__nexus_db);
     return newEvent;
   },
 
   getStats: () => {
-    const records = global.__nexus_db!.records;
+    if (!global.__nexus_db) global.__nexus_db = loadFromDisk();
+    const records = global.__nexus_db.records;
     return {
       totalRecords: records.length,
       audioCount: records.filter((r) => r.category === "audio").length,
       docCount: records.filter((r) => r.category === "documento").length,
       financeCount: records.filter((r) => r.category === "financeiro").length,
       systemCount: records.filter((r) => r.category === "sistema").length,
-      totalSyncs: global.__nexus_db!.syncEvents.length,
-      lastSync: global.__nexus_db!.syncEvents[0]?.createdAt || null,
+      researchCount: records.filter((r) => r.category === "pesquisa").length,
+      totalSyncs: global.__nexus_db.syncEvents.length,
+      lastSync: global.__nexus_db.syncEvents[0]?.createdAt || null,
       activeStatus: "OPERACIONAL 100%",
     };
   },

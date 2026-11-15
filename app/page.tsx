@@ -25,6 +25,11 @@ import {
   Volume2,
   BookmarkPlus,
   Sparkles,
+  Lock,
+  User,
+  LogOut,
+  AlertCircle,
+  KeyRound,
 } from "lucide-react";
 
 interface RecordItem {
@@ -56,7 +61,21 @@ interface SyncEvent {
   createdAt: string;
 }
 
+const STORAGE_KEYS = {
+  AUTH: "nexus_auth_session",
+  MESSAGES: "nexus_chat_history_v2",
+  RECORDS: "nexus_records_store_v2",
+};
+
 export default function NexusDashboard() {
+  // Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [loginUser, setLoginUser] = useState("");
+  const [loginPass, setLoginPass] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  // Tab State
   const [activeTab, setActiveTab] = useState<"bot" | "database" | "api" | "vault">("bot");
 
   // Bot State
@@ -89,19 +108,118 @@ export default function NexusDashboard() {
   const [copied, setCopied] = useState(false);
   const [savedSuccessId, setSavedSuccessId] = useState<string | null>(null);
 
-  // Initial Fetch
+  // Check Auth & LocalStorage on Mount
   useEffect(() => {
-    fetchMessages();
-    fetchRecords();
+    // 1. Auth check
+    const savedAuth = localStorage.getItem(STORAGE_KEYS.AUTH);
+    if (savedAuth === "true") {
+      setIsAuthenticated(true);
+    } else {
+      setIsAuthenticated(false);
+    }
+
+    // 2. Chat history from localStorage
+    const savedChat = localStorage.getItem(STORAGE_KEYS.MESSAGES);
+    if (savedChat) {
+      try {
+        const parsed = JSON.parse(savedChat);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
+        } else {
+          fetchInitialMessages();
+        }
+      } catch (e) {
+        fetchInitialMessages();
+      }
+    } else {
+      fetchInitialMessages();
+    }
+
+    // 3. Records from localStorage
+    const savedRecs = localStorage.getItem(STORAGE_KEYS.RECORDS);
+    if (savedRecs) {
+      try {
+        const parsed = JSON.parse(savedRecs);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setRecords(parsed);
+        } else {
+          fetchRecords();
+        }
+      } catch (e) {
+        fetchRecords();
+      }
+    } else {
+      fetchRecords();
+    }
+
     fetchSyncEvents();
   }, []);
 
+  // Save Messages to localStorage whenever they change
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(messages));
+    }
+  }, [messages]);
+
+  // Save Records to localStorage whenever they change
+  useEffect(() => {
+    if (records.length > 0) {
+      localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(records));
+    }
+  }, [records]);
+
+  // Scroll to bottom on new messages
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, botLoading]);
 
+  // Login handler
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError("");
+
+    const u = loginUser.trim().toLowerCase();
+    const p = loginPass.trim();
+
+    // Credenciais: vns24k / 24k (ou qualquer acesso do estúdio vn-24k)
+    if ((u === "vns24k" || u === "vn-24k" || u === "admin") && (p === "24k" || p === "studio24k" || p === "admin")) {
+      setTimeout(() => {
+        localStorage.setItem(STORAGE_KEYS.AUTH, "true");
+        setIsAuthenticated(true);
+        setLoginLoading(false);
+      }, 400);
+    } else {
+      setTimeout(() => {
+        setLoginError("Credenciais inválidas. Dica: Usuário vns24k | Senha: 24k");
+        setLoginLoading(false);
+      }, 300);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem(STORAGE_KEYS.AUTH);
+    setIsAuthenticated(false);
+  };
+
+  const handleClearChat = () => {
+    if (confirm("Deseja realmente limpar o histórico do chat?")) {
+      const resetMsg: BotMessage[] = [
+        {
+          id: `msg_init_${Date.now()}`,
+          role: "bot",
+          content: "Histórico de conversa reiniciado. O que você gostaria de perguntar ou registrar agora?",
+          createdAt: new Date().toISOString(),
+        },
+      ];
+      setMessages(resetMsg);
+      localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(resetMsg));
+    }
+  };
+
   // Fetch helpers
-  const fetchMessages = async () => {
+  const fetchInitialMessages = async () => {
     try {
       const res = await fetch("/api/bot");
       const json = await res.json();
@@ -123,7 +241,17 @@ export default function NexusDashboard() {
       const res = await fetch(url.toString());
       const json = await res.json();
       if (json.success && json.data) {
-        setRecords(json.data);
+        // Merge with existing localStorage records to prevent any loss
+        setRecords((prev) => {
+          const map = new Map<string, RecordItem>();
+          for (const item of prev) map.set(item.id, item);
+          for (const item of json.data) map.set(item.id, item);
+          const merged = Array.from(map.values()).sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+          localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(merged));
+          return merged;
+        });
       }
     } catch (e) {
       console.error(e);
@@ -131,10 +259,6 @@ export default function NexusDashboard() {
       setRecordsLoading(false);
     }
   };
-
-  useEffect(() => {
-    fetchRecords();
-  }, [selectedCategory, searchQuery]);
 
   const fetchSyncEvents = async () => {
     try {
@@ -158,7 +282,6 @@ export default function NexusDashboard() {
     setInputMessage("");
     setBotLoading(true);
 
-    // Optimistic user message
     const tempUserMsg: BotMessage = {
       id: `temp_${Date.now()}`,
       role: "user",
@@ -227,54 +350,74 @@ export default function NexusDashboard() {
     }
   };
 
-  // Save Bot Answer to Database
+  // Save Bot Answer to Database (Persistent!)
   const handleSaveToDatabase = async (content: string, id: string) => {
     try {
-      const title = content.substring(0, 40).replace(/[*#]/g, "").trim() + "...";
-      const res = await fetch("/api/records", {
+      const title = content.substring(0, 45).replace(/[*#\n]/g, " ").trim() + "...";
+      const newRec: RecordItem = {
+        id: `rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        title: `Nota: ${title}`,
+        content: content,
+        category: "pesquisa",
+        status: "processado",
+        metadata: { salvoVia: "OmniBot", msgId: id },
+        createdAt: new Date().toISOString(),
+      };
+
+      // 1. Instant local persistence
+      setRecords((prev) => {
+        const updated = [newRec, ...prev];
+        localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(updated));
+        return updated;
+      });
+
+      setSavedSuccessId(id);
+      setTimeout(() => setSavedSuccessId(null), 3000);
+
+      // 2. Server persistence
+      await fetch("/api/records", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: `Resposta: ${title}`,
-          content: content,
-          category: "pesquisa",
-          status: "processado",
-        }),
+        body: JSON.stringify(newRec),
       });
-      const json = await res.json();
-      if (json.success) {
-        setSavedSuccessId(id);
-        fetchRecords();
-        setTimeout(() => setSavedSuccessId(null), 3000);
-      }
     } catch (e) {
       console.error(e);
     }
   };
 
-  // Create record
+  // Create record manually
   const handleCreateRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !newContent.trim()) return;
 
+    const newRec: RecordItem = {
+      id: `rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title: newTitle,
+      content: newContent,
+      category: newCategory,
+      status: "processado",
+      metadata: { criadoManualmente: true },
+      createdAt: new Date().toISOString(),
+    };
+
+    // 1. Instant local persistence
+    setRecords((prev) => {
+      const updated = [newRec, ...prev];
+      localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(updated));
+      return updated;
+    });
+
+    setIsAddModalOpen(false);
+    setNewTitle("");
+    setNewContent("");
+
+    // 2. Server persistence
     try {
-      const res = await fetch("/api/records", {
+      await fetch("/api/records", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: newTitle,
-          content: newContent,
-          category: newCategory,
-          status: "processado",
-        }),
+        body: JSON.stringify(newRec),
       });
-      const json = await res.json();
-      if (json.success) {
-        setIsAddModalOpen(false);
-        setNewTitle("");
-        setNewContent("");
-        fetchRecords();
-      }
     } catch (e) {
       console.error(e);
     }
@@ -282,12 +425,16 @@ export default function NexusDashboard() {
 
   // Delete record
   const handleDeleteRecord = async (id: string) => {
+    // 1. Instant local persistence
+    setRecords((prev) => {
+      const filtered = prev.filter((r) => r.id !== id);
+      localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(filtered));
+      return filtered;
+    });
+
+    // 2. Server sync
     try {
-      const res = await fetch(`/api/records?id=${id}`, { method: "DELETE" });
-      const json = await res.json();
-      if (json.success) {
-        setRecords((prev) => prev.filter((r) => r.id !== id));
-      }
+      await fetch(`/api/records?id=${id}`, { method: "DELETE" });
     } catch (e) {
       console.error(e);
     }
@@ -342,6 +489,125 @@ export default function NexusDashboard() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Filter records
+  const filteredRecords = records.filter((r) => {
+    const matchCat = selectedCategory === "todos" || r.category === selectedCategory;
+    const matchSearch =
+      !searchQuery ||
+      r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.content.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchCat && matchSearch;
+  });
+
+  // Loading Screen while reading localStorage
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen bg-[#07080c] flex items-center justify-center">
+        <div className="flex items-center space-x-3 text-amber-400 font-mono text-xs">
+          <RefreshCw size={16} className="animate-spin" />
+          <span>Carregando ambiente seguro...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // TELA DE LOGIN
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#07080c] flex flex-col justify-between p-6 relative overflow-hidden">
+        {/* Ambient Glows */}
+        <div className="fixed inset-0 pointer-events-none z-0">
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-yellow-600/10 rounded-full blur-3xl"></div>
+        </div>
+
+        <div className="flex-1 flex items-center justify-center relative z-10">
+          <div className="glass-panel rounded-3xl w-full max-w-md p-8 border border-white/10 shadow-2xl relative">
+            {/* Header / Logo */}
+            <div className="text-center mb-8">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-600 to-yellow-400 flex items-center justify-center font-bold text-black text-2xl shadow-xl mx-auto mb-4">
+                VN
+              </div>
+              <h1 className="text-xl font-bold tracking-tight text-white">NEXUS WORKSTATION</h1>
+              <p className="text-xs text-zinc-400 mt-1">Acesso à Central de Inteligência e Banco de Dados</p>
+            </div>
+
+            {/* Error message */}
+            {loginError && (
+              <div className="mb-5 p-3 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center space-x-2 text-xs text-red-400">
+                <AlertCircle size={15} />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            {/* Login Form */}
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-zinc-300 block mb-1.5 flex items-center space-x-1.5">
+                  <User size={13} className="text-amber-400" />
+                  <span>Usuário</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={loginUser}
+                  onChange={(e) => setLoginUser(e.target.value)}
+                  placeholder="vns24k"
+                  className="w-full bg-zinc-900/90 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-zinc-300 block mb-1.5 flex items-center space-x-1.5">
+                  <Lock size={13} className="text-amber-400" />
+                  <span>Senha de Acesso</span>
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={loginPass}
+                  onChange={(e) => setLoginPass(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-zinc-900/90 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition font-mono"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loginLoading}
+                className="w-full py-3.5 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-black font-bold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition flex items-center justify-center space-x-2 disabled:opacity-50 mt-2"
+              >
+                {loginLoading ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>Autenticando...</span>
+                  </>
+                ) : (
+                  <>
+                    <KeyRound size={14} />
+                    <span>Acessar Plataforma</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* Credential Hint */}
+            <div className="mt-6 pt-5 border-t border-white/5 text-center">
+              <span className="text-[11px] text-zinc-500 font-mono">
+                Acesso do Estúdio: <strong className="text-amber-400">vns24k</strong> | Senha: <strong className="text-amber-400">24k</strong>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <footer className="text-center text-xs text-zinc-600 relative z-10">
+          <p>© 2026 Studio VN (vn-24k). Todos os direitos reservados.</p>
+        </footer>
+      </div>
+    );
+  }
+
+  // DASHBOARD PRINCIPAL (AUTENTICADO)
   return (
     <div className="flex flex-col min-h-screen bg-[#07080c] text-zinc-100">
       {/* Top Header */}
@@ -355,27 +621,27 @@ export default function NexusDashboard() {
               <div className="flex items-center space-x-2">
                 <h1 className="text-base font-bold tracking-tight text-white">NEXUS WORKSTATION</h1>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
-                  v2.5 Neural
+                  v2.6 Pro
                 </span>
               </div>
-              <p className="text-xs text-zinc-400">Inteligência Artificial, APIs REST e Banco de Dados</p>
+              <p className="text-xs text-zinc-400">Sessão Ativa: <span className="text-amber-300 font-mono">vns24k</span></p>
             </div>
           </div>
 
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-3">
             <div className="hidden sm:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-zinc-900/60 border border-white/5 text-xs text-zinc-300">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               <span>Motor Neural Online</span>
             </div>
-            <a
-              href="https://github.com/vn-24k/nexus-workstation"
-              target="_blank"
-              rel="noreferrer"
-              className="hidden md:flex items-center space-x-1.5 text-xs text-amber-400 hover:text-amber-300 transition"
+
+            <button
+              onClick={handleLogout}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition text-xs font-semibold"
+              title="Sair da sessão"
             >
-              <span>GitHub</span>
-              <ExternalLink size={13} />
-            </a>
+              <LogOut size={13} />
+              <span>Sair</span>
+            </button>
           </div>
         </div>
       </header>
@@ -407,7 +673,7 @@ export default function NexusDashboard() {
           >
             <Database size={16} />
             <span>Banco de Dados</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-zinc-400">
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-800 text-amber-400 font-bold">
               {records.length}
             </span>
           </button>
@@ -440,22 +706,22 @@ export default function NexusDashboard() {
         {/* TAB 1: OMNIBOT NEURAL */}
         {activeTab === "bot" && (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1">
-            {/* Sidebar with Live Prompt Ideas */}
+            {/* Sidebar with Prompt Suggestions */}
             <div className="lg:col-span-1 space-y-4">
               <div className="glass-panel rounded-2xl p-4">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2 flex items-center space-x-2">
                   <Sparkles size={14} />
-                  <span>Pergunte Qualquer Coisa</span>
+                  <span>Perguntas & Ações Rápidas</span>
                 </h2>
                 <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
-                  O OmniBot agora possui motor neural ilimitado. Clique em uma sugestão ou faça sua pergunta livre:
+                  O bot responde qualquer assunto e você pode salvar a resposta no banco com um clique:
                 </p>
 
                 <div className="space-y-2">
                   {[
                     "Como funciona a física quântica?",
-                    "Escreva uma minuta de contrato de prestação de serviços",
-                    "Qual a melhor estratégia para vender serviços digitais?",
+                    "Escreva uma minuta de contrato de desenvolvimento",
+                    "Qual a melhor estratégia para vender serviços?",
                     "Crie um script em Python para automação",
                     "Explique a Teoria da Relatividade em 3 pontos",
                     "/add Análise de Mercado | Metas do trimestre",
@@ -473,40 +739,43 @@ export default function NexusDashboard() {
                 </div>
               </div>
 
-              {/* Engine Status */}
+              {/* Status and Memory Indicator */}
               <div className="glass-panel rounded-2xl p-4">
                 <div className="flex items-center space-x-3 mb-2">
                   <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                    <Activity size={16} />
+                    <CheckCircle2 size={16} />
                   </div>
                   <div>
-                    <div className="text-xs font-semibold text-white">IA Neural Ativa</div>
-                    <div className="text-[11px] text-zinc-400">Suporte a Voz e Síntese Humana</div>
+                    <div className="text-xs font-semibold text-white">Memória Persistente</div>
+                    <div className="text-[11px] text-zinc-400">Zero perda ao atualizar a página</div>
                   </div>
                 </div>
                 <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  Conectado à síntese de voz (Fish Audio) e ao banco de dados relacional. Cada resposta pode ser ouvida ou salva como registro.
+                  Histórico de chat e banco de dados salvos de forma contínua no seu navegador e sincronizados com o servidor.
                 </p>
               </div>
             </div>
 
-            {/* Chat Messages and Input */}
+            {/* Chat Timeline */}
             <div className="lg:col-span-3 flex flex-col glass-panel rounded-2xl overflow-hidden min-h-[580px] max-h-[780px]">
-              {/* Chat Timeline Header */}
+              {/* Header */}
               <div className="p-4 border-b border-white/5 flex items-center justify-between bg-black/20">
                 <div className="flex items-center space-x-2 text-xs text-zinc-300">
                   <Bot size={15} className="text-amber-400" />
                   <span className="font-semibold text-white">OmniBot Neural Terminal</span>
                   <span className="text-zinc-500">•</span>
-                  <span className="text-[11px] text-emerald-400">Responde Qualquer Pergunta</span>
+                  <span className="text-[11px] text-emerald-400">{messages.length} mensagens salvas</span>
                 </div>
-                <button
-                  onClick={fetchMessages}
-                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition"
-                  title="Atualizar mensagens"
-                >
-                  <RefreshCw size={13} />
-                </button>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={handleClearChat}
+                    className="px-2.5 py-1 rounded-lg text-xs text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition"
+                    title="Limpar histórico de chat"
+                  >
+                    Limpar Chat
+                  </button>
+                </div>
               </div>
 
               {/* Messages Container */}
@@ -632,7 +901,7 @@ export default function NexusDashboard() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between">
               <div className="flex flex-wrap items-center gap-2">
-                {["todos", "audio", "documento", "financeiro", "sistema", "pesquisa"].map((cat) => (
+                {["todos", "pesquisa", "audio", "documento", "financeiro", "sistema"].map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat)}
@@ -669,20 +938,15 @@ export default function NexusDashboard() {
               </div>
             </div>
 
-            {recordsLoading ? (
-              <div className="p-12 text-center text-xs text-zinc-500 flex items-center justify-center space-x-2">
-                <RefreshCw size={14} className="animate-spin text-amber-400" />
-                <span>Carregando dados do banco...</span>
-              </div>
-            ) : records.length === 0 ? (
+            {filteredRecords.length === 0 ? (
               <div className="glass-panel rounded-2xl p-12 text-center">
                 <Database size={32} className="mx-auto text-zinc-600 mb-3" />
                 <div className="text-sm font-semibold text-zinc-300">Nenhum registro encontrado</div>
-                <p className="text-xs text-zinc-500 mt-1">Crie um novo registro ou salve uma resposta do Bot.</p>
+                <p className="text-xs text-zinc-500 mt-1">Crie um novo registro ou clique em &quot;Salvar no Banco&quot; no chat.</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {records.map((rec) => (
+                {filteredRecords.map((rec) => (
                   <div
                     key={rec.id}
                     className="glass-panel rounded-2xl p-5 hover:border-amber-500/30 transition flex flex-col justify-between space-y-4"
@@ -812,7 +1076,7 @@ export default function NexusDashboard() {
                   <pre>{JSON.stringify(apiResponse, null, 2)}</pre>
                 ) : (
                   <div className="text-zinc-500 text-center py-20">
-                    Selecione o endpoint da IA ao lado e clique em &quot;Executar&quot; para ver a resposta em tempo real.
+                    Selecione um endpoint ao lado e clique em &quot;Executar&quot; para disparar uma requisição ao vivo.
                   </div>
                 )}
               </div>
@@ -925,11 +1189,11 @@ export default function NexusDashboard() {
                   onChange={(e) => setNewCategory(e.target.value as any)}
                   className="w-full bg-zinc-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
                 >
+                  <option value="pesquisa">Pesquisa</option>
                   <option value="sistema">Sistema</option>
                   <option value="audio">Áudio</option>
                   <option value="documento">Documento</option>
                   <option value="financeiro">Financeiro</option>
-                  <option value="pesquisa">Pesquisa</option>
                 </select>
               </div>
 
