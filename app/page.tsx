@@ -22,6 +22,9 @@ import {
   HardDrive,
   Copy,
   Check,
+  Volume2,
+  BookmarkPlus,
+  Sparkles,
 } from "lucide-react";
 
 interface RecordItem {
@@ -60,7 +63,10 @@ export default function NexusDashboard() {
   const [messages, setMessages] = useState<BotMessage[]>([]);
   const [inputMessage, setInputMessage] = useState("");
   const [botLoading, setBotLoading] = useState(false);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [audioLoadingId, setAudioLoadingId] = useState<string | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Database State
   const [records, setRecords] = useState<RecordItem[]>([]);
@@ -81,6 +87,7 @@ export default function NexusDashboard() {
   const [apiLatency, setApiLatency] = useState<number | null>(null);
   const [testingEndpoint, setTestingEndpoint] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [savedSuccessId, setSavedSuccessId] = useState<string | null>(null);
 
   // Initial Fetch
   useEffect(() => {
@@ -142,11 +149,12 @@ export default function NexusDashboard() {
   };
 
   // Bot Handler
-  const handleSendMessage = async (e?: React.FormEvent) => {
+  const handleSendMessage = async (e?: React.FormEvent, customPrompt?: string) => {
     if (e) e.preventDefault();
-    if (!inputMessage.trim() || botLoading) return;
+    const promptToSend = customPrompt || inputMessage;
+    if (!promptToSend.trim() || botLoading) return;
 
-    const userText = inputMessage.trim();
+    const userText = promptToSend.trim();
     setInputMessage("");
     setBotLoading(true);
 
@@ -168,7 +176,6 @@ export default function NexusDashboard() {
       const json = await res.json();
       if (json.success && json.message) {
         setMessages((prev) => [...prev, json.message]);
-        // Refresh records and sync if command affected them
         fetchRecords();
         fetchSyncEvents();
       }
@@ -176,6 +183,72 @@ export default function NexusDashboard() {
       console.error(err);
     } finally {
       setBotLoading(false);
+    }
+  };
+
+  // Play Speech (TTS)
+  const handlePlayTTS = async (msgId: string, text: string) => {
+    if (playingAudioId === msgId) {
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current = null;
+      }
+      setPlayingAudioId(null);
+      return;
+    }
+
+    setAudioLoadingId(msgId);
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!res.ok) throw new Error("Falha na síntese de áudio");
+
+      const blob = await res.blob();
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      currentAudioRef.current = audio;
+
+      audio.onended = () => {
+        setPlayingAudioId(null);
+        currentAudioRef.current = null;
+      };
+
+      setPlayingAudioId(msgId);
+      audio.play();
+    } catch (e) {
+      console.error(e);
+      alert("Não foi possível reproduzir a voz no momento.");
+    } finally {
+      setAudioLoadingId(null);
+    }
+  };
+
+  // Save Bot Answer to Database
+  const handleSaveToDatabase = async (content: string, id: string) => {
+    try {
+      const title = content.substring(0, 40).replace(/[*#]/g, "").trim() + "...";
+      const res = await fetch("/api/records", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `Resposta: ${title}`,
+          content: content,
+          category: "pesquisa",
+          status: "processado",
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setSavedSuccessId(id);
+        fetchRecords();
+        setTimeout(() => setSavedSuccessId(null), 3000);
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -282,25 +355,25 @@ export default function NexusDashboard() {
               <div className="flex items-center space-x-2">
                 <h1 className="text-base font-bold tracking-tight text-white">NEXUS WORKSTATION</h1>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
-                  v2.4
+                  v2.5 Neural
                 </span>
               </div>
-              <p className="text-xs text-zinc-400">Ambiente de Operações, Bot e Banco de Dados</p>
+              <p className="text-xs text-zinc-400">Inteligência Artificial, APIs REST e Banco de Dados</p>
             </div>
           </div>
 
           <div className="flex items-center space-x-4">
             <div className="hidden sm:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-zinc-900/60 border border-white/5 text-xs text-zinc-300">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>Cluster Operacional</span>
+              <span>Motor Neural Online</span>
             </div>
             <a
-              href="https://huggingface.co/spaces/vns24k/nexus-hub"
+              href="https://github.com/vn-24k/nexus-workstation"
               target="_blank"
               rel="noreferrer"
               className="hidden md:flex items-center space-x-1.5 text-xs text-amber-400 hover:text-amber-300 transition"
             >
-              <span>Space Hub</span>
+              <span>GitHub</span>
               <ExternalLink size={13} />
             </a>
           </div>
@@ -320,7 +393,7 @@ export default function NexusDashboard() {
             }`}
           >
             <Bot size={16} />
-            <span>OmniBot Interativo</span>
+            <span>OmniBot Neural</span>
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
           </button>
 
@@ -364,70 +437,68 @@ export default function NexusDashboard() {
           </button>
         </div>
 
-        {/* TAB 1: OMNIBOT */}
+        {/* TAB 1: OMNIBOT NEURAL */}
         {activeTab === "bot" && (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1">
-            {/* Sidebar with Quick Commands */}
+            {/* Sidebar with Live Prompt Ideas */}
             <div className="lg:col-span-1 space-y-4">
               <div className="glass-panel rounded-2xl p-4">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-3 flex items-center space-x-2">
-                  <Terminal size={14} />
-                  <span>Comandos Rápidos</span>
+                <h2 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2 flex items-center space-x-2">
+                  <Sparkles size={14} />
+                  <span>Pergunte Qualquer Coisa</span>
                 </h2>
-                <p className="text-xs text-zinc-400 mb-4 leading-relaxed">
-                  Clique para preencher o terminal ou digite instruções em linguagem natural.
+                <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
+                  O OmniBot agora possui motor neural ilimitado. Clique em uma sugestão ou faça sua pergunta livre:
                 </p>
 
                 <div className="space-y-2">
                   {[
-                    { cmd: "/status", desc: "Auditar cluster e métricas" },
-                    { cmd: "/sync", desc: "Disparar backup no cofre" },
-                    { cmd: "/db", desc: "Consultar registros do banco" },
-                    { cmd: "/ocr", desc: "Relatório de visão e recibos" },
-                    { cmd: "/help", desc: "Lista de todos os comandos" },
-                    { cmd: "/add Projeto Alpha | Escopo inicial", desc: "Gravar registro no banco" },
-                  ].map((item, idx) => (
+                    "Como funciona a física quântica?",
+                    "Escreva uma minuta de contrato de prestação de serviços",
+                    "Qual a melhor estratégia para vender serviços digitais?",
+                    "Crie um script em Python para automação",
+                    "Explique a Teoria da Relatividade em 3 pontos",
+                    "/add Análise de Mercado | Metas do trimestre",
+                  ].map((promptText, idx) => (
                     <button
                       key={idx}
-                      onClick={() => setInputMessage(item.cmd)}
+                      onClick={() => handleSendMessage(undefined, promptText)}
                       className="w-full text-left p-2.5 rounded-xl bg-zinc-900/50 hover:bg-amber-500/10 border border-white/5 hover:border-amber-500/30 transition text-xs group"
                     >
-                      <div className="font-mono text-amber-300 font-semibold flex items-center justify-between">
-                        <span>{item.cmd.split(" ")[0]}</span>
-                        <ChevronRight size={12} className="opacity-0 group-hover:opacity-100 transition text-amber-400" />
+                      <div className="text-zinc-300 font-medium line-clamp-2 group-hover:text-amber-300 transition">
+                        {promptText}
                       </div>
-                      <div className="text-[11px] text-zinc-400 mt-0.5">{item.desc}</div>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Bot Info Card */}
+              {/* Engine Status */}
               <div className="glass-panel rounded-2xl p-4">
-                <div className="flex items-center space-x-3 mb-3">
-                  <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                <div className="flex items-center space-x-3 mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
                     <Activity size={16} />
                   </div>
                   <div>
-                    <div className="text-xs font-semibold text-white">Status da IA e Automação</div>
-                    <div className="text-[11px] text-emerald-400">Latência: ~35ms (Local Server)</div>
+                    <div className="text-xs font-semibold text-white">IA Neural Ativa</div>
+                    <div className="text-[11px] text-zinc-400">Suporte a Voz e Síntese Humana</div>
                   </div>
                 </div>
                 <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  Conectado à engine de orquestração do Studio VN. Acesso direto a leitura/escrita no banco de dados e sincronização de ativos.
+                  Conectado à síntese de voz (Fish Audio) e ao banco de dados relacional. Cada resposta pode ser ouvida ou salva como registro.
                 </p>
               </div>
             </div>
 
             {/* Chat Messages and Input */}
-            <div className="lg:col-span-3 flex flex-col glass-panel rounded-2xl overflow-hidden min-h-[550px] max-h-[750px]">
+            <div className="lg:col-span-3 flex flex-col glass-panel rounded-2xl overflow-hidden min-h-[580px] max-h-[780px]">
               {/* Chat Timeline Header */}
               <div className="p-4 border-b border-white/5 flex items-center justify-between bg-black/20">
                 <div className="flex items-center space-x-2 text-xs text-zinc-300">
                   <Bot size={15} className="text-amber-400" />
-                  <span className="font-semibold text-white">OmniBot Console</span>
+                  <span className="font-semibold text-white">OmniBot Neural Terminal</span>
                   <span className="text-zinc-500">•</span>
-                  <span className="text-[11px] text-zinc-400">Sessão Ativa</span>
+                  <span className="text-[11px] text-emerald-400">Responde Qualquer Pergunta</span>
                 </div>
                 <button
                   onClick={fetchMessages}
@@ -448,7 +519,7 @@ export default function NexusDashboard() {
                     }`}
                   >
                     <div className="flex items-center space-x-2 text-[10px] text-zinc-500 mb-1 px-1">
-                      <span>{msg.role === "user" ? "Você" : "Nexus Bot"}</span>
+                      <span>{msg.role === "user" ? "Você" : "OmniBot Neural"}</span>
                       <span>•</span>
                       <span>
                         {new Date(msg.createdAt).toLocaleTimeString([], {
@@ -462,20 +533,57 @@ export default function NexusDashboard() {
                       className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed ${
                         msg.role === "user"
                           ? "bg-amber-500 text-black font-medium rounded-tr-none shadow-md shadow-amber-500/10"
-                          : "bg-zinc-900/80 border border-white/10 text-zinc-200 rounded-tl-none whitespace-pre-wrap font-mono"
+                          : "bg-zinc-900/90 border border-white/10 text-zinc-200 rounded-tl-none whitespace-pre-wrap"
                       }`}
                     >
                       {msg.content}
 
-                      {/* Attached Structured Data Card */}
-                      {msg.data && typeof msg.data === "object" && (
-                        <div className="mt-3 pt-2.5 border-t border-white/10 text-[11px] text-zinc-400">
-                          <div className="text-[10px] uppercase font-bold text-amber-400 mb-1">
-                            Metadados da Execução
-                          </div>
-                          <pre className="p-2 rounded bg-black/50 text-[10px] overflow-x-auto text-zinc-300 font-mono">
-                            {JSON.stringify(msg.data, null, 2)}
-                          </pre>
+                      {/* Bot Actions: Play Voice (TTS) & Save to Database */}
+                      {msg.role === "bot" && (
+                        <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => handlePlayTTS(msg.id, msg.content)}
+                            disabled={audioLoadingId === msg.id}
+                            className={`flex items-center space-x-1.5 text-[11px] px-2.5 py-1 rounded-lg border transition ${
+                              playingAudioId === msg.id
+                                ? "bg-amber-500 text-black border-amber-500 font-bold animate-pulse"
+                                : "bg-black/40 text-amber-400 border-amber-500/20 hover:bg-amber-500/10"
+                            }`}
+                          >
+                            <Volume2 size={13} />
+                            <span>
+                              {audioLoadingId === msg.id
+                                ? "Gerando voz..."
+                                : playingAudioId === msg.id
+                                ? "Pausar Voz"
+                                : "Ouvir Resposta"}
+                            </span>
+                          </button>
+
+                          <button
+                            onClick={() => handleSaveToDatabase(msg.content, msg.id)}
+                            className="flex items-center space-x-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-black/40 text-zinc-400 border border-white/10 hover:text-white hover:bg-white/5 transition"
+                          >
+                            {savedSuccessId === msg.id ? (
+                              <>
+                                <Check size={13} className="text-emerald-400" />
+                                <span className="text-emerald-400 font-semibold">Salvo no Banco!</span>
+                              </>
+                            ) : (
+                              <>
+                                <BookmarkPlus size={13} />
+                                <span>Salvar no Banco</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            onClick={() => copyToClipboard(msg.content)}
+                            className="flex items-center space-x-1 text-[11px] px-2 py-1 text-zinc-500 hover:text-zinc-300 transition"
+                          >
+                            <Copy size={12} />
+                            <span>Copiar</span>
+                          </button>
                         </div>
                       )}
                     </div>
@@ -484,10 +592,10 @@ export default function NexusDashboard() {
 
                 {botLoading && (
                   <div className="flex flex-col items-start">
-                    <div className="text-[10px] text-zinc-500 mb-1">Nexus Bot</div>
-                    <div className="bg-zinc-900/80 border border-white/10 rounded-2xl rounded-tl-none px-4 py-3 flex items-center space-x-2 text-xs text-amber-400">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
-                      <span className="font-mono text-xs">Processando comando...</span>
+                    <div className="text-[10px] text-zinc-500 mb-1">OmniBot Neural</div>
+                    <div className="bg-zinc-900/90 border border-white/10 rounded-2xl rounded-tl-none px-4 py-3 flex items-center space-x-2 text-xs text-amber-400">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                      <span className="font-medium text-xs">Pensando e sintetizando resposta inteligente...</span>
                     </div>
                   </div>
                 )}
@@ -496,20 +604,20 @@ export default function NexusDashboard() {
 
               {/* Input Form */}
               <form
-                onSubmit={handleSendMessage}
+                onSubmit={(e) => handleSendMessage(e)}
                 className="p-3 border-t border-white/5 bg-black/40 flex items-center space-x-3"
               >
                 <input
                   type="text"
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
-                  placeholder="Envie uma mensagem ou execute um comando (ex: /status, /sync, /help)..."
-                  className="flex-1 bg-zinc-900/90 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition font-mono"
+                  placeholder="Pergunte qualquer coisa (física, código, negócios, contratos, cálculos)..."
+                  className="flex-1 bg-zinc-900/90 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition"
                 />
                 <button
                   type="submit"
                   disabled={botLoading || !inputMessage.trim()}
-                  className="px-4 py-3 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 disabled:opacity-40 disabled:cursor-not-allowed text-black font-bold rounded-xl text-xs flex items-center space-x-2 transition shadow-lg shadow-amber-500/10"
+                  className="px-5 py-3 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 disabled:opacity-40 disabled:cursor-not-allowed text-black font-bold rounded-xl text-xs flex items-center space-x-2 transition shadow-lg shadow-amber-500/10"
                 >
                   <span>Enviar</span>
                   <Send size={13} />
@@ -522,10 +630,9 @@ export default function NexusDashboard() {
         {/* TAB 2: DATABASE */}
         {activeTab === "database" && (
           <div className="space-y-6">
-            {/* Top Bar: Search, Category Filter, and Add Button */}
             <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between">
               <div className="flex flex-wrap items-center gap-2">
-                {["todos", "audio", "documento", "financeiro", "sistema"].map((cat) => (
+                {["todos", "audio", "documento", "financeiro", "sistema", "pesquisa"].map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat)}
@@ -562,7 +669,6 @@ export default function NexusDashboard() {
               </div>
             </div>
 
-            {/* Records Grid */}
             {recordsLoading ? (
               <div className="p-12 text-center text-xs text-zinc-500 flex items-center justify-center space-x-2">
                 <RefreshCw size={14} className="animate-spin text-amber-400" />
@@ -572,7 +678,7 @@ export default function NexusDashboard() {
               <div className="glass-panel rounded-2xl p-12 text-center">
                 <Database size={32} className="mx-auto text-zinc-600 mb-3" />
                 <div className="text-sm font-semibold text-zinc-300">Nenhum registro encontrado</div>
-                <p className="text-xs text-zinc-500 mt-1">Crie um novo registro ou ajuste os filtros.</p>
+                <p className="text-xs text-zinc-500 mt-1">Crie um novo registro ou salve uma resposta do Bot.</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -602,7 +708,7 @@ export default function NexusDashboard() {
                       </div>
 
                       <h3 className="text-sm font-bold text-white mb-2 leading-snug">{rec.title}</h3>
-                      <p className="text-xs text-zinc-400 leading-relaxed">{rec.content}</p>
+                      <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap">{rec.content}</p>
                     </div>
 
                     <div className="pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-zinc-500">
@@ -628,25 +734,25 @@ export default function NexusDashboard() {
               </div>
 
               {[
-                { method: "GET", url: "/api/system/status", label: "Status do Cluster & Uptime", body: null },
-                { method: "GET", url: "/api/records", label: "Listar Todos os Registros", body: null },
-                {
-                  method: "POST",
-                  url: "/api/records",
-                  label: "Inserir Registro via POST",
-                  body: { title: "Registro Teste via API", content: "Criado diretamente pela suíte REST", category: "sistema" },
-                },
                 {
                   method: "POST",
                   url: "/api/bot",
-                  label: "Executar Mensagem do Bot",
-                  body: { message: "/status" },
+                  label: "Perguntar Qualquer Coisa (IA)",
+                  body: { message: "Qual é a velocidade da luz e como ela foi calculada?" },
                 },
                 {
                   method: "POST",
-                  url: "/api/vault/sync",
-                  label: "Disparar Sincronização de Nuvem",
-                  body: {},
+                  url: "/api/tts",
+                  label: "Sintetizar Voz Humana (Fish Audio)",
+                  body: { text: "Olá! A síntese de voz está 100% operacional no seu servidor." },
+                },
+                { method: "GET", url: "/api/system/status", label: "Status do Cluster & Uptime", body: null },
+                { method: "GET", url: "/api/records", label: "Listar Registros do Banco", body: null },
+                {
+                  method: "POST",
+                  url: "/api/records",
+                  label: "Inserir Novo Registro",
+                  body: { title: "Planejamento 2026", content: "Metas de expansão do estúdio", category: "sistema" },
                 },
               ].map((ep, idx) => (
                 <div
@@ -656,7 +762,9 @@ export default function NexusDashboard() {
                   <div className="flex items-center justify-between">
                     <span
                       className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${
-                        ep.method === "GET" ? "bg-blue-500/10 text-blue-400 border border-blue-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                        ep.method === "GET"
+                          ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                          : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
                       }`}
                     >
                       {ep.method}
@@ -704,7 +812,7 @@ export default function NexusDashboard() {
                   <pre>{JSON.stringify(apiResponse, null, 2)}</pre>
                 ) : (
                   <div className="text-zinc-500 text-center py-20">
-                    Selecione um endpoint ao lado e clique em &quot;Executar&quot; para disparar uma requisição ao vivo.
+                    Selecione o endpoint da IA ao lado e clique em &quot;Executar&quot; para ver a resposta em tempo real.
                   </div>
                 )}
               </div>
@@ -723,7 +831,7 @@ export default function NexusDashboard() {
                 </div>
                 <h2 className="text-2xl font-bold text-white font-display">Hugging Face Vault Sync</h2>
                 <p className="text-xs text-zinc-300 max-w-xl leading-relaxed">
-                  Repositório de dataset 100% privado (<span className="font-mono text-amber-300">vns24k/vault-backup</span>). Permite sincronizar snapshots completos do banco de dados, áudios e arquivos com hash SHA-256 verificado.
+                  Repositório de dataset 100% privado (<span className="font-mono text-amber-300">vns24k/vault-backup</span>). Permite sincronizar snapshots completos do banco de dados e arquivos com hash SHA-256.
                 </p>
               </div>
 

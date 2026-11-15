@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
+const SYSTEM_PROMPT = `Você é o OmniBot, o assistente executivo, analítico e de engenharia do Studio VN (vn-24k).
+Suas diretrizes:
+1. Responda a QUALQUER pergunta do usuário com inteligência profunda, clareza, alta capacidade técnica e pragmatismo.
+2. Você resolve código, matemática, redação de contratos, resumos, ciência, negócios, arquitetura de sistemas e tarefas cotidianas.
+3. Mantenha um tom profissional, direto e autoral em português brasileiro, sem enrolação e sem frases clichês.
+4. Quando solicitado código ou dados, forneça exemplos funcionais e prontos para uso.`;
+
 export async function GET() {
   const messages = db.getMessages();
   return NextResponse.json({
@@ -11,7 +18,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { message } = await req.json();
+    const { message, customApiKey } = await req.json();
 
     if (!message || typeof message !== "string" || !message.trim()) {
       return NextResponse.json(
@@ -25,40 +32,30 @@ export async function POST(req: NextRequest) {
     db.addMessage("user", cleanInput);
 
     let botReply = "";
-    let actionData: any = null;
     let commandUsed: string | undefined = undefined;
+    let actionData: any = null;
 
     const lower = cleanInput.toLowerCase();
 
-    // Command Dispatcher
-    if (lower === "/help" || lower.includes("ajuda") || lower === "help") {
-      commandUsed = "/help";
-      botReply = `Comandos do Nexus Bot:
-• /status — Relatório operacional do cluster e banco de dados.
-• /db [termo] — Consulta e filtra registros no banco relacional.
-• /add [Título] | [Conteúdo] — Grava um novo registro diretamente no banco.
-• /sync — Dispara snapshot de backup no cofre de dados privado.
-• /ocr [arquivo] — Simula extração de dados e texto de imagens e recibos.
-• Linguagem natural — Faça perguntas sobre seus dados, áudios e arquivos.`;
-    } else if (lower.startsWith("/status") || lower.includes("status do sistema") || lower.includes("como esta o sistema")) {
+    // Check if it's a specific local system command
+    if (lower === "/status" || lower.startsWith("/status")) {
       commandUsed = "/status";
       const stats = db.getStats();
-      botReply = `Cluster Operacional 100% Ativo:
-• Registros no Banco: ${stats.totalRecords}
-• Mídia & Áudios: ${stats.audioCount}
-• Documentos & Minutas: ${stats.docCount}
+      botReply = `Diagnóstico Operacional do Cluster VN:
+• Total de Registros: ${stats.totalRecords}
+• Mídia e Áudio: ${stats.audioCount}
+• Minutas e Contratos: ${stats.docCount}
 • Financeiro & OCR: ${stats.financeCount}
-• Sincronizações com o Vault: ${stats.totalSyncs}
-• Repositório Seguro: vns24k/vault-backup (Ativo)`;
+• Sincronizações com Vault: ${stats.totalSyncs}
+• Status do Sistema: 100% OPERACIONAL`;
       actionData = stats;
-    } else if (lower.startsWith("/sync") || lower.includes("sincronizar") || lower.includes("fazer backup")) {
+    } else if (lower.startsWith("/sync")) {
       commandUsed = "/sync";
       const syncEvent = db.triggerSync();
       botReply = `Snapshot do banco gerado com sucesso!
 • Arquivo: ${syncEvent.snapshotName}
 • Hash SHA-256: ${syncEvent.hash.substring(0, 16)}...
-• Total de arquivos indexados: ${syncEvent.fileCount}
-• Tamanho: ${syncEvent.totalSizeMb} MB
+• Arquivos indexados: ${syncEvent.fileCount}
 • Destino: Hugging Face Vault (vns24k/vault-backup)`;
       actionData = syncEvent;
     } else if (lower.startsWith("/add ")) {
@@ -73,45 +70,54 @@ export async function POST(req: NextRequest) {
         content,
         category: "sistema",
         status: "processado",
-        metadata: { criadoVia: "Nexus Bot", timestamp: Date.now() },
+        metadata: { criadoVia: "OmniBot Neural", timestamp: Date.now() },
       });
 
-      botReply = `Novo registro gravado com sucesso no banco de dados:
-• ID: ${newRec.id}
+      botReply = `Registro gravado com sucesso no banco de dados:
 • Título: "${newRec.title}"
-• Categoria: Sistema
-• Conteúdo: ${newRec.content}`;
-      actionData = newRec;
-    } else if (lower.startsWith("/db") || lower.startsWith("/records") || lower.includes("consultar banco") || lower.includes("ver registros")) {
-      commandUsed = "/db";
-      const term = lower.replace("/db", "").replace("/records", "").trim();
-      const records = db.getRecords(undefined, term || undefined);
-      botReply = `Consulta ao banco retornou ${records.length} registro(s)${term ? ` para "${term}"` : ""}:
-${records.slice(0, 3).map((r) => `• [${r.category.toUpperCase()}] ${r.title} (${r.status})`).join("\n")}${records.length > 3 ? `\n... e mais ${records.length - 3} itens.` : ""}`;
-      actionData = records;
-    } else if (lower.startsWith("/ocr") || lower.includes("ocr") || lower.includes("ler imagem")) {
-      commandUsed = "/ocr";
-      const newRec = db.addRecord({
-        title: "Relatório de Reconhecimento Óptico (OCR)",
-        category: "financeiro",
-        content: "Extrato processado via Tesseract 5.5. Dados validados: 3 transações, valor líquido total apurado de R$ 8.940,00.",
-        status: "processado",
-        metadata: { engine: "tesseract-por", accuracy: "99.4%" },
-      });
-      botReply = `Execução de OCR finalizada com sucesso! O resultado foi arquivado no banco de dados:
-• Título: ${newRec.title}
-• Precisão apurada: 99.4%
-• Registro ID: ${newRec.id}`;
+• Conteúdo: ${newRec.content}
+• ID Gerado: ${newRec.id}`;
       actionData = newRec;
     } else {
-      // Natural dialogue response
-      botReply = `Compreendido. Sua instrução foi processada pelo Nexus Bot.
+      // 2. Real AI Neural Brain for ANY QUESTION
+      try {
+        const recentHistory = db
+          .getMessages()
+          .slice(-6)
+          .map((m) => ({
+            role: m.role === "user" ? "user" : "assistant",
+            content: m.content,
+          }));
 
-Comandos rápidos que você pode executar:
-• Digite "/status" para auditar o banco e o cluster.
-• Digite "/sync" para salvar um snapshot no cofre da nuvem.
-• Digite "/add Minha Ideia | Detalhes da anotação" para gravar no banco.
-• Digite "/db" para listar tudo o que está arquivado.`;
+        // Call open neural inference endpoint
+        const aiResponse = await fetch("https://text.pollinations.ai/openai/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              ...recentHistory,
+            ],
+            model: "openai",
+          }),
+          signal: AbortSignal.timeout(20000),
+        });
+
+        if (aiResponse.ok) {
+          const aiJson = await aiResponse.json();
+          const generatedText = aiJson.choices?.[0]?.message?.content;
+          if (generatedText && generatedText.trim()) {
+            botReply = generatedText.trim();
+          }
+        }
+      } catch (aiErr: any) {
+        console.error("AI Fallback trigger:", aiErr.message);
+      }
+
+      // Robust fallback if external network is congested
+      if (!botReply) {
+        botReply = `Recebi sua solicitação: "${cleanInput}".\n\nO motor de inferência está reprocessando a rota. Posso responder qualquer dúvida técnica, criar novos registros via "/add [Título] | [Conteúdo]" ou auditar o cluster com "/status".`;
+      }
     }
 
     const botMessage = db.addMessage("bot", botReply, commandUsed, actionData);
