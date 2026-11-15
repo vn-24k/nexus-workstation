@@ -105,6 +105,7 @@ export default function VnTtsStudio() {
   const [isSynthesizingDispatch, setIsSynthesizingDispatch] = useState(false);
   const [dispatchAudioBlob, setDispatchAudioBlob] = useState<Blob | null>(null);
   const [dispatchAudioUrl, setDispatchAudioUrl] = useState<string | null>(null);
+  const [dispatchAudioSourceText, setDispatchAudioSourceText] = useState<string>("");
   const [isPlayingDispatchAudio, setIsPlayingDispatchAudio] = useState(false);
   const dispatchAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
@@ -296,6 +297,22 @@ export default function VnTtsStudio() {
     }
   };
 
+  // Helper to handle text updates and cleanly reset stale audio
+  const handleDispatchTextChange = (text: string) => {
+    setDispatchText(text);
+    if (dispatchAudioPlayerRef.current) {
+      dispatchAudioPlayerRef.current.pause();
+      dispatchAudioPlayerRef.current = null;
+    }
+    setIsPlayingDispatchAudio(false);
+    if (dispatchAudioUrl) {
+      URL.revokeObjectURL(dispatchAudioUrl);
+      setDispatchAudioUrl(null);
+    }
+    setDispatchAudioBlob(null);
+    setDispatchAudioSourceText("");
+  };
+
   // Play Speech (TTS in Chat)
   const handlePlayVoice = async (msgId: string, text: string) => {
     if (playingMessageId === msgId) {
@@ -307,12 +324,19 @@ export default function VnTtsStudio() {
       return;
     }
 
+    // Stop previous audio playback before starting new one
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+      activeAudioRef.current = null;
+    }
+
     setLoadingAudioId(msgId);
     try {
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        cache: "no-store",
+        body: JSON.stringify({ text, timestamp: Date.now() }),
       });
 
       if (!res.ok) throw new Error("Erro na síntese vocal");
@@ -328,8 +352,16 @@ export default function VnTtsStudio() {
         activeAudioRef.current = null;
       };
 
+      audio.onerror = () => {
+        setPlayingMessageId(null);
+        activeAudioRef.current = null;
+      };
+
       setPlayingMessageId(msgId);
-      audio.play();
+      audio.play().catch(() => {
+        setPlayingMessageId(null);
+        activeAudioRef.current = null;
+      });
     } catch (err) {
       console.error(err);
     } finally {
@@ -339,18 +371,34 @@ export default function VnTtsStudio() {
 
   // DISPATCH TAB: Generate Audio with My Voice
   const handleSynthesizeDispatch = async () => {
-    if (!dispatchText.trim() || isSynthesizingDispatch) return;
+    const textToSynthesize = dispatchText.trim();
+    if (!textToSynthesize || isSynthesizingDispatch) return;
+
+    // Immediately stop and cleanup any previous player & audio URL
+    if (dispatchAudioPlayerRef.current) {
+      dispatchAudioPlayerRef.current.pause();
+      dispatchAudioPlayerRef.current = null;
+    }
+    if (dispatchAudioUrl) {
+      URL.revokeObjectURL(dispatchAudioUrl);
+    }
 
     setIsSynthesizingDispatch(true);
     setDispatchAudioBlob(null);
     setDispatchAudioUrl(null);
     setIsPlayingDispatchAudio(false);
+    setDispatchAudioSourceText("");
 
     try {
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: dispatchText.trim(), mood: dispatchMood }),
+        cache: "no-store",
+        body: JSON.stringify({
+          text: textToSynthesize,
+          mood: dispatchMood,
+          timestamp: Date.now(),
+        }),
       });
 
       if (!res.ok) throw new Error("Falha na síntese de áudio");
@@ -360,6 +408,7 @@ export default function VnTtsStudio() {
 
       setDispatchAudioBlob(blob);
       setDispatchAudioUrl(audioUrl);
+      setDispatchAudioSourceText(textToSynthesize);
     } catch (err) {
       console.error(err);
       alert("Não foi possível gerar a síntese vocal no momento.");
@@ -372,17 +421,37 @@ export default function VnTtsStudio() {
   const handleToggleDispatchAudio = () => {
     if (!dispatchAudioUrl) return;
 
-    if (isPlayingDispatchAudio && dispatchAudioPlayerRef.current) {
-      dispatchAudioPlayerRef.current.pause();
-      setIsPlayingDispatchAudio(false);
-    } else {
-      if (!dispatchAudioPlayerRef.current) {
-        dispatchAudioPlayerRef.current = new Audio(dispatchAudioUrl);
-        dispatchAudioPlayerRef.current.onended = () => setIsPlayingDispatchAudio(false);
+    if (isPlayingDispatchAudio) {
+      if (dispatchAudioPlayerRef.current) {
+        dispatchAudioPlayerRef.current.pause();
       }
-      dispatchAudioPlayerRef.current.play();
-      setIsPlayingDispatchAudio(true);
+      setIsPlayingDispatchAudio(false);
+      return;
     }
+
+    // Always stop and recreate player so new audio URL is strictly respected
+    if (dispatchAudioPlayerRef.current) {
+      dispatchAudioPlayerRef.current.pause();
+      dispatchAudioPlayerRef.current = null;
+    }
+
+    const audio = new Audio(dispatchAudioUrl);
+    dispatchAudioPlayerRef.current = audio;
+
+    audio.onended = () => {
+      setIsPlayingDispatchAudio(false);
+    };
+
+    audio.onerror = () => {
+      setIsPlayingDispatchAudio(false);
+    };
+
+    audio.play()
+      .then(() => setIsPlayingDispatchAudio(true))
+      .catch((e) => {
+        console.error("Erro ao tocar áudio:", e);
+        setIsPlayingDispatchAudio(false);
+      });
   };
 
   // DISPATCH TAB: Direct Automated Voice Note (PTT) dispatch via WhatsApp Bridge (5511995685756)
@@ -405,7 +474,8 @@ export default function VnTtsStudio() {
 
     try {
       let audioBase64: string | undefined = undefined;
-      if (dispatchAudioBlob && !overrideText) {
+      // Only reuse existing audio blob if it strictly matches the current textToSend!
+      if (dispatchAudioBlob && dispatchAudioSourceText === textToSend && !overrideText) {
         const buffer = await dispatchAudioBlob.arrayBuffer();
         const bytes = new Uint8Array(buffer);
         let binary = "";
@@ -418,6 +488,7 @@ export default function VnTtsStudio() {
       const res = await fetch("/api/whatsapp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        cache: "no-store",
         body: JSON.stringify({
           phone: targetPhone,
           text: textToSend,
@@ -617,7 +688,7 @@ export default function VnTtsStudio() {
 
   // Quick Action: Use Record content directly in Vocal Dispatch
   const handleUseInDispatch = (content: string) => {
-    setDispatchText(content);
+    handleDispatchTextChange(content);
     setCurrentTab("dispatch");
   };
 
@@ -750,7 +821,7 @@ export default function VnTtsStudio() {
 
   // Re-use saved audio directly in Disparo Vocal for 1-click WhatsApp sending
   const handleDispatchSavedAudio = (record: RecordNote) => {
-    setDispatchText(record.content);
+    handleDispatchTextChange(record.content);
     if (record.audioBase64) {
       try {
         const byteCharacters = atob(record.audioBase64);
@@ -763,6 +834,7 @@ export default function VnTtsStudio() {
         const url = URL.createObjectURL(blob);
         setDispatchAudioBlob(blob);
         setDispatchAudioUrl(url);
+        setDispatchAudioSourceText(record.content.trim());
       } catch (e) {
         console.error("Erro ao decodificar áudio salvo:", e);
       }
@@ -1015,7 +1087,7 @@ export default function VnTtsStudio() {
               <textarea
                 rows={3}
                 value={dispatchText}
-                onChange={(e) => setDispatchText(e.target.value)}
+                onChange={(e) => handleDispatchTextChange(e.target.value)}
                 placeholder="Digite sua fala como você falaria... (ex: 'Oi, tudo bem? Tô saindo agora do estúdio e te ligo em 10 minutos...')"
                 className="w-full bg-zinc-900/70 border border-white/10 rounded-2xl p-4 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 transition resize-none leading-relaxed"
               />
@@ -1029,7 +1101,7 @@ export default function VnTtsStudio() {
                 ].map((phrase, i) => (
                   <button
                     key={i}
-                    onClick={() => setDispatchText(phrase)}
+                    onClick={() => handleDispatchTextChange(phrase)}
                     className="px-2.5 py-1 rounded-full bg-zinc-900/60 hover:bg-zinc-800 border border-white/[0.04] text-[10px] text-zinc-400 hover:text-white transition"
                   >
                     {phrase}
@@ -1126,7 +1198,7 @@ export default function VnTtsStudio() {
                   </button>
 
                   <div className="flex-1">
-                    <div className="text-xs font-medium text-white truncate">{dispatchText}</div>
+                    <div className="text-xs font-medium text-white truncate">{dispatchAudioSourceText || dispatchText}</div>
                     <div className="text-[11px] text-zinc-400 mt-0.5 flex items-center space-x-2">
                       <span>Voz Humana</span>
                       <span>•</span>
@@ -1253,7 +1325,7 @@ export default function VnTtsStudio() {
 
                         <button
                           onClick={() => {
-                            setDispatchText(msg.content);
+                            handleDispatchTextChange(msg.content);
                             setCurrentTab("dispatch");
                           }}
                           className="flex items-center space-x-1.5 text-emerald-400/90 hover:text-emerald-300 transition"

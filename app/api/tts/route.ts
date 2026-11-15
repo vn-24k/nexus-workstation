@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const FISH_AUDIO_API_KEY = process.env.FISH_AUDIO_API_KEY || "sk-fish-RFtQu0UUESjwP6F9hPPwA9keMox40MXL_E5WZtK0TkQ";
 const VOICE_REF_ID = "d34eb157e1e7474c98c9c63d79f7ce9a";
 
@@ -21,6 +24,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "application/json",
         "model": "s2.1-pro-free",
       },
+      cache: "no-store",
       body: JSON.stringify({
         text: cleanText,
         reference_id: VOICE_REF_ID,
@@ -39,7 +43,9 @@ export async function POST(req: NextRequest) {
       status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
-        "Cache-Control": "public, max-age=3600",
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
       },
     });
   } catch (err: any) {
