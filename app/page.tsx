@@ -28,6 +28,11 @@ import {
   Copy,
   Radio,
   ArrowRight,
+  Video,
+  Film,
+  Camera,
+  Clapperboard,
+  Layers,
 } from "lucide-react";
 
 interface VoiceAnchor {
@@ -54,9 +59,11 @@ interface RecordNote {
   id: string;
   title: string;
   content: string;
-  category: "voz" | "ideia" | "assistente" | "documento" | "pesquisa" | "geral";
+  category: "voz" | "ideia" | "assistente" | "documento" | "pesquisa" | "geral" | "video";
   createdAt: string;
   audioBase64?: string;
+  videoBase64?: string;
+  videoUrl?: string;
   mood?: string;
   duration?: string;
 }
@@ -83,8 +90,26 @@ export default function VnTtsStudio() {
   const [loginPass, setLoginPass] = useState("");
   const [loginError, setLoginError] = useState("");
 
-  // Navigation: assistant | dispatch | voice | records
-  const [currentTab, setCurrentTab] = useState<"assistant" | "dispatch" | "voice" | "records">("dispatch");
+  // Navigation: assistant | dispatch | video | voice | records
+  const [currentTab, setCurrentTab] = useState<"assistant" | "dispatch" | "video" | "voice" | "records">("dispatch");
+
+  // Video Lip-Sync States
+  const [selectedPortrait, setSelectedPortrait] = useState<string>("/portraits/portrait_1.jpg");
+  const [customPortraitData, setCustomPortraitData] = useState<string | null>(null);
+  const [videoText, setVideoText] = useState("");
+  const [videoAudioBlob, setVideoAudioBlob] = useState<Blob | null>(null);
+  const [videoAudioUrl, setVideoAudioUrl] = useState<string | null>(null);
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const [videoProgressStatus, setVideoProgressStatus] = useState("");
+  const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
+  const [generatedVideoBase64, setGeneratedVideoBase64] = useState<string | null>(null);
+  const [videoContact, setVideoContact] = useState(PRESET_CONTACTS[0]);
+  const [videoCustomPhone, setVideoCustomPhone] = useState("");
+  const [isPtv, setIsPtv] = useState(true);
+  const [isSendingWhatsAppVideo, setIsSendingWhatsAppVideo] = useState(false);
+  const [whatsappVideoResult, setWhatsappVideoResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [savedVideoSuccess, setSavedVideoSuccess] = useState(false);
+  const videoFileInputRef = useRef<HTMLInputElement>(null);
 
   // Chat
   const [messages, setMessages] = useState<Message[]>([]);
@@ -519,6 +544,153 @@ export default function VnTtsStudio() {
     }
   };
 
+  // VIDEO LAB: Handlers for Lip-Sync
+  const handlePortraitUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setCustomPortraitData(reader.result);
+        setSelectedPortrait("custom");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleTransferAudioToVideo = () => {
+    if (dispatchAudioBlob) {
+      setVideoAudioBlob(dispatchAudioBlob);
+      setVideoAudioUrl(dispatchAudioUrl);
+    }
+    setVideoText(dispatchAudioSourceText || dispatchText);
+    setCurrentTab("video");
+  };
+
+  const handleGenerateLipSyncVideo = async () => {
+    if (isGeneratingVideo) return;
+    const textToSend = videoText.trim();
+    if (!videoAudioBlob && !textToSend) {
+      alert("Por favor, digite uma fala ou utilize um áudio previamente gerado.");
+      return;
+    }
+
+    setIsGeneratingVideo(true);
+    setGeneratedVideoUrl(null);
+    setGeneratedVideoBase64(null);
+    setWhatsappVideoResult(null);
+    setSavedVideoSuccess(false);
+
+    try {
+      setVideoProgressStatus("1/3 Preparando retrato e áudio vocal...");
+      let audioBase64: string | undefined = undefined;
+      if (videoAudioBlob) {
+        const buf = await videoAudioBlob.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let bin = "";
+        for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+        audioBase64 = btoa(bin);
+      }
+
+      setVideoProgressStatus("2/3 Conectando ao cluster ZeroGPU no Hugging Face...");
+      const imageToSend = customPortraitData || selectedPortrait;
+
+      const res = await fetch("/api/video/lipsync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: imageToSend,
+          audio: audioBase64,
+          text: !audioBase64 ? textToSend : undefined,
+        }),
+      });
+
+      setVideoProgressStatus("3/3 Finalizando renderização do movimento labial...");
+      const data = await res.json();
+      if (!data.ok) {
+        throw new Error(data.error || "Falha ao gerar o vídeo Lip-Sync.");
+      }
+
+      setGeneratedVideoUrl(data.videoUrl);
+      setGeneratedVideoBase64(data.videoBase64 || null);
+    } catch (err: any) {
+      console.error("Erro na geração do vídeo:", err);
+      alert(err.message || "Não foi possível gerar o vídeo Lip-Sync no momento.");
+    } finally {
+      setIsGeneratingVideo(false);
+      setVideoProgressStatus("");
+    }
+  };
+
+  const handleSendVideoToWhatsApp = async () => {
+    if (!generatedVideoBase64 && !generatedVideoUrl) {
+      alert("Gere o vídeo antes de disparar no WhatsApp.");
+      return;
+    }
+
+    const targetPhone = videoContact.id === "outro" ? videoCustomPhone.replace(/\D/g, "") : videoContact.phone;
+    if (!targetPhone) {
+      alert("Selecione ou informe o telefone do WhatsApp.");
+      return;
+    }
+
+    setIsSendingWhatsAppVideo(true);
+    setWhatsappVideoResult(null);
+
+    try {
+      const res = await fetch("/api/whatsapp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "video",
+          phone: targetPhone,
+          videoBase64: generatedVideoBase64,
+          ptv: isPtv,
+          caption: isPtv ? undefined : videoText.trim() || "Vídeo com voz autoral Studio VN",
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        setWhatsappVideoResult({
+          ok: true,
+          message: `Vídeo ${isPtv ? "circular (PTV)" : "MP4"} transmitido com sucesso para ${videoContact.name || targetPhone} pelo seu WhatsApp (11995685756)!`,
+        });
+      } else {
+        setWhatsappVideoResult({
+          ok: false,
+          message: data.error || "Falha ao enviar vídeo pelo WhatsApp.",
+        });
+      }
+    } catch (err: any) {
+      setWhatsappVideoResult({
+        ok: false,
+        message: err.message || "Erro de conexão ao enviar vídeo.",
+      });
+    } finally {
+      setIsSendingWhatsAppVideo(false);
+    }
+  };
+
+  const handleSaveVideoToRecords = () => {
+    if (!generatedVideoBase64 && !generatedVideoUrl) return;
+
+    const newRecord: RecordNote = {
+      id: `video_${Date.now()}`,
+      title: videoText ? (videoText.length > 35 ? videoText.slice(0, 35) + "..." : videoText) : "Vídeo Lip-Sync Studio VN",
+      content: videoText || "Vídeo com animação facial e sincronia labial gerado via Hugging Face ZeroGPU.",
+      category: "video",
+      createdAt: new Date().toISOString(),
+      videoBase64: generatedVideoBase64 || undefined,
+      videoUrl: generatedVideoUrl || undefined,
+      duration: "0:06",
+    };
+
+    setRecords((prev) => [newRecord, ...prev]);
+    setSavedVideoSuccess(true);
+    setTimeout(() => setSavedVideoSuccess(false), 2500);
+  };
+
   // Live Microphone Recording & AI Analysis Functions
   const startRecording = async () => {
     try {
@@ -951,11 +1123,11 @@ export default function VnTtsStudio() {
             <span className="text-xs font-medium tracking-tight text-white">VN TTS</span>
           </div>
 
-          {/* Segmented Control Pill with 4 Tabs */}
-          <nav className="flex items-center p-1 rounded-full bg-zinc-900/80 border border-white/[0.08] text-xs">
+          {/* Segmented Control Pill with 5 Tabs */}
+          <nav className="flex items-center p-1 rounded-full bg-zinc-900/80 border border-white/[0.08] text-xs overflow-x-auto">
             <button
               onClick={() => setCurrentTab("dispatch")}
-              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 flex items-center space-x-1.5 ${
+              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 flex items-center space-x-1.5 shrink-0 ${
                 currentTab === "dispatch"
                   ? "bg-white text-black font-medium shadow-sm"
                   : "text-zinc-400 hover:text-white"
@@ -965,8 +1137,19 @@ export default function VnTtsStudio() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
             </button>
             <button
+              onClick={() => setCurrentTab("video")}
+              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 flex items-center space-x-1.5 shrink-0 ${
+                currentTab === "video"
+                  ? "bg-white text-black font-medium shadow-sm"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              <Video size={12} className={currentTab === "video" ? "text-black" : "text-amber-400"} />
+              <span>Vídeo Lab</span>
+            </button>
+            <button
               onClick={() => setCurrentTab("assistant")}
-              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 ${
+              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 shrink-0 ${
                 currentTab === "assistant"
                   ? "bg-white text-black font-medium shadow-sm"
                   : "text-zinc-400 hover:text-white"
@@ -976,7 +1159,7 @@ export default function VnTtsStudio() {
             </button>
             <button
               onClick={() => setCurrentTab("voice")}
-              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 ${
+              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 shrink-0 ${
                 currentTab === "voice"
                   ? "bg-white text-black font-medium shadow-sm"
                   : "text-zinc-400 hover:text-white"
@@ -986,7 +1169,7 @@ export default function VnTtsStudio() {
             </button>
             <button
               onClick={() => setCurrentTab("records")}
-              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 ${
+              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 shrink-0 ${
                 currentTab === "records"
                   ? "bg-white text-black font-medium shadow-sm"
                   : "text-zinc-400 hover:text-white"
@@ -1208,7 +1391,7 @@ export default function VnTtsStudio() {
                 </div>
 
                 {/* Dispatch Trigger Buttons */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 pt-1">
                   <button
                     onClick={() => handleSendToWhatsApp()}
                     disabled={isSendingWhatsApp}
@@ -1220,6 +1403,14 @@ export default function VnTtsStudio() {
                       <MessageCircle size={14} />
                     )}
                     <span>Disparar WhatsApp</span>
+                  </button>
+
+                  <button
+                    onClick={handleTransferAudioToVideo}
+                    className="py-3 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs flex items-center justify-center space-x-1.5 transition shadow-lg shadow-amber-900/20"
+                  >
+                    <Video size={13} className="text-black" />
+                    <span>🎬 Criar Vídeo Lab</span>
                   </button>
 
                   <button
@@ -1250,6 +1441,353 @@ export default function VnTtsStudio() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB: VÍDEO LIP-SYNC & ANIMAÇÃO FACIAL */}
+        {currentTab === "video" && (
+          <div className="flex flex-col flex-1 max-w-4xl mx-auto w-full space-y-6">
+            {/* Header */}
+            <div className="text-center space-y-1.5 pb-2">
+              <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-300 font-mono tracking-tight">
+                <Sparkles size={11} />
+                <span>HUGGING FACE ZEROGPU • SINCRONIA FACIAL</span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-semibold tracking-tight text-white">
+                Estúdio de Vídeo Lip-Sync
+              </h2>
+              <p className="text-xs text-zinc-400 max-w-lg mx-auto">
+                Dê vida e movimento ao seu rosto. Sincronize fala autoral com qualquer retrato fotográfico e dispare no WhatsApp em alta definição.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left Column: Configuração (Retrato + Áudio) */}
+              <div className="lg:col-span-6 space-y-5">
+                {/* 1. Escolha do Retrato */}
+                <div className="apple-card rounded-3xl p-5 border-white/10 space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
+                    <div className="flex items-center space-x-2">
+                      <Camera size={14} className="text-amber-400" />
+                      <span className="text-xs font-semibold text-white">1. Retrato Fotográfico</span>
+                    </div>
+                    <span className="text-[10px] text-zinc-500 font-mono">Alta Fidelidade</span>
+                  </div>
+
+                  {/* Previews / Selector */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedPortrait("/portraits/portrait_1.jpg");
+                        setCustomPortraitData(null);
+                      }}
+                      className={`relative rounded-2xl overflow-hidden border p-1 transition aspect-square flex flex-col items-center justify-center ${
+                        selectedPortrait === "/portraits/portrait_1.jpg" && !customPortraitData
+                          ? "border-amber-400 shadow-md shadow-amber-500/20 bg-amber-500/10"
+                          : "border-white/10 hover:border-white/30 bg-zinc-900/60"
+                      }`}
+                    >
+                      <img
+                        src="/portraits/portrait_1.jpg"
+                        alt="Studio VN"
+                        className="w-full h-full object-cover rounded-xl"
+                      />
+                      <span className="absolute bottom-1.5 inset-x-1.5 bg-black/80 backdrop-blur-md rounded-lg py-0.5 text-[9px] font-medium text-center text-white truncate px-1">
+                        Studio VN
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedPortrait("/portraits/portrait_2.jpg");
+                        setCustomPortraitData(null);
+                      }}
+                      className={`relative rounded-2xl overflow-hidden border p-1 transition aspect-square flex flex-col items-center justify-center ${
+                        selectedPortrait === "/portraits/portrait_2.jpg" && !customPortraitData
+                          ? "border-amber-400 shadow-md shadow-amber-500/20 bg-amber-500/10"
+                          : "border-white/10 hover:border-white/30 bg-zinc-900/60"
+                      }`}
+                    >
+                      <img
+                        src="/portraits/portrait_2.jpg"
+                        alt="Editorial"
+                        className="w-full h-full object-cover rounded-xl"
+                      />
+                      <span className="absolute bottom-1.5 inset-x-1.5 bg-black/80 backdrop-blur-md rounded-lg py-0.5 text-[9px] font-medium text-center text-white truncate px-1">
+                        Editorial
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => videoFileInputRef.current?.click()}
+                      className={`relative rounded-2xl overflow-hidden border p-2 transition aspect-square flex flex-col items-center justify-center text-center ${
+                        customPortraitData
+                          ? "border-amber-400 shadow-md shadow-amber-500/20 bg-amber-500/10"
+                          : "border-dashed border-white/20 hover:border-white/40 bg-zinc-900/40"
+                      }`}
+                    >
+                      {customPortraitData ? (
+                        <img
+                          src={customPortraitData}
+                          alt="Sua Foto"
+                          className="w-full h-full object-cover rounded-xl"
+                        />
+                      ) : (
+                        <>
+                          <Upload size={18} className="text-zinc-400 mb-1" />
+                          <span className="text-[10px] text-zinc-300 font-medium">Subir Foto</span>
+                        </>
+                      )}
+                      <input
+                        ref={videoFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handlePortraitUpload}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Áudio & Fala da Voz */}
+                <div className="apple-card rounded-3xl p-5 border-white/10 space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
+                    <div className="flex items-center space-x-2">
+                      <Mic size={14} className="text-emerald-400" />
+                      <span className="text-xs font-semibold text-white">2. Áudio ou Fala Autoral</span>
+                    </div>
+                    {videoAudioBlob ? (
+                      <span className="text-[10px] text-emerald-400 font-mono flex items-center space-x-1">
+                        <Check size={11} />
+                        <span>Áudio Pronto</span>
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-zinc-500 font-mono">Síntese em tempo real</span>
+                    )}
+                  </div>
+
+                  <textarea
+                    rows={3}
+                    value={videoText}
+                    onChange={(e) => {
+                      setVideoText(e.target.value);
+                      setVideoAudioBlob(null);
+                      setVideoAudioUrl(null);
+                    }}
+                    placeholder="Digite o que o seu rosto vai falar... (ex: 'Fala aí! Passando aqui pra te desejar um excelente dia...')"
+                    className="w-full bg-zinc-900/70 border border-white/10 rounded-2xl p-3.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 transition resize-none leading-relaxed"
+                  />
+
+                  {/* Preset quick phrases */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      "Fala aí! Tô saindo agora e já te ligo.",
+                      "Oi amor, passando pra te desejar um dia incrível!",
+                      "Recebi aqui, já tô analisando e te aviso.",
+                    ].map((phrase, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          setVideoText(phrase);
+                          setVideoAudioBlob(null);
+                          setVideoAudioUrl(null);
+                        }}
+                        className="px-2.5 py-1 rounded-full bg-zinc-900/60 hover:bg-zinc-800 border border-white/[0.04] text-[10px] text-zinc-400 hover:text-white transition"
+                      >
+                        {phrase}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Main Trigger Button */}
+                  <button
+                    type="button"
+                    onClick={handleGenerateLipSyncVideo}
+                    disabled={isGeneratingVideo || (!videoText.trim() && !videoAudioBlob)}
+                    className="w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs flex items-center justify-center space-x-2 transition shadow-xl shadow-amber-900/20 disabled:opacity-30 active:scale-[0.99]"
+                  >
+                    {isGeneratingVideo ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin text-black" />
+                        <span>{videoProgressStatus || "Processando no ZeroGPU..."}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Clapperboard size={14} className="text-black" />
+                        <span>Gerar Vídeo com Sincronia Labial</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Right Column: Player & Disparo WhatsApp */}
+              <div className="lg:col-span-6 space-y-5">
+                <div className="apple-card rounded-3xl p-5 border-white/10 flex flex-col justify-between min-h-[380px]">
+                  <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
+                    <div className="flex items-center space-x-2">
+                      <Film size={14} className="text-zinc-300" />
+                      <span className="text-xs font-semibold text-white">Pré-visualização do Vídeo</span>
+                    </div>
+                    {generatedVideoUrl && (
+                      <span className="text-[10px] text-emerald-400 font-mono flex items-center space-x-1">
+                        <Check size={11} />
+                        <span>Renderizado</span>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Video Screen / Placeholder */}
+                  <div className="flex-1 flex items-center justify-center my-4">
+                    {generatedVideoUrl ? (
+                      <div className="w-full rounded-2xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
+                        <video
+                          src={generatedVideoUrl}
+                          controls
+                          autoPlay
+                          loop
+                          playsInline
+                          className="w-full h-auto max-h-[300px] object-contain mx-auto"
+                        />
+                      </div>
+                    ) : isGeneratingVideo ? (
+                      <div className="text-center p-8 space-y-3">
+                        <div className="w-12 h-12 rounded-full border-2 border-amber-400/20 border-t-amber-400 animate-spin mx-auto"></div>
+                        <div className="text-xs font-medium text-white">Renderizando Sincronia Labial</div>
+                        <div className="text-[11px] text-zinc-500 max-w-xs">{videoProgressStatus}</div>
+                      </div>
+                    ) : (
+                      <div className="text-center p-8 space-y-2 border border-dashed border-white/10 rounded-2xl w-full">
+                        <Video size={28} className="text-zinc-600 mx-auto stroke-1" />
+                        <div className="text-xs text-zinc-400 font-medium">Nenhum vídeo gerado ainda</div>
+                        <p className="text-[11px] text-zinc-600 max-w-xs mx-auto">
+                          Escolha seu retrato, digite sua fala e clique em gerar para renderizar seu vídeo com sincronia labial.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dispatch Controls (When Video Ready) */}
+                  {generatedVideoUrl && (
+                    <div className="space-y-3 pt-3 border-t border-white/[0.06] animate-in fade-in duration-200">
+                      {/* Contact Selection */}
+                      <div>
+                        <label className="text-[11px] font-medium text-zinc-400 block mb-1.5">
+                          Destinatário WhatsApp:
+                        </label>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                          {PRESET_CONTACTS.map((contact) => (
+                            <button
+                              key={contact.id}
+                              type="button"
+                              onClick={() => setVideoContact(contact)}
+                              className={`py-2 px-2 rounded-xl text-[11px] font-medium flex items-center justify-center space-x-1 border transition ${
+                                videoContact.id === contact.id
+                                  ? "bg-white text-black border-white shadow-sm"
+                                  : "bg-zinc-900/80 text-zinc-400 border-white/[0.06] hover:text-white"
+                              }`}
+                            >
+                              <span>{contact.icon}</span>
+                              <span className="truncate">{contact.name}</span>
+                            </button>
+                          ))}
+                        </div>
+
+                        {videoContact.id === "outro" && (
+                          <input
+                            type="tel"
+                            value={videoCustomPhone}
+                            onChange={(e) => setVideoCustomPhone(e.target.value)}
+                            placeholder="Ex: 5511999998888"
+                            className="w-full mt-2 bg-zinc-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none"
+                          />
+                        )}
+                      </div>
+
+                      {/* Format Toggle: PTV vs Standard */}
+                      <div className="flex items-center justify-between p-2 rounded-xl bg-black/40 border border-white/[0.04]">
+                        <span className="text-[11px] text-zinc-400 font-medium">
+                          {isPtv ? "🟢 Nota Circular (PTV gravado na hora)" : "📹 Vídeo Padrão MP4"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsPtv(!isPtv)}
+                          className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-200 transition"
+                        >
+                          Alterar formato
+                        </button>
+                      </div>
+
+                      {/* Feedback Alert */}
+                      {whatsappVideoResult && (
+                        <div
+                          className={`p-3 rounded-xl border text-xs flex items-start space-x-2 ${
+                            whatsappVideoResult.ok
+                              ? "bg-emerald-950/40 border-emerald-500/30 text-emerald-200"
+                              : "bg-red-950/40 border-red-500/30 text-red-200"
+                          }`}
+                        >
+                          {whatsappVideoResult.ok ? (
+                            <CheckCircle2 size={14} className="text-emerald-400 shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertCircle size={14} className="text-red-400 shrink-0 mt-0.5" />
+                          )}
+                          <span className="text-[11px] leading-relaxed">{whatsappVideoResult.message}</span>
+                        </div>
+                      )}
+
+                      {/* Action Buttons */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSendVideoToWhatsApp}
+                          disabled={isSendingWhatsAppVideo}
+                          className="py-3 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center space-x-1.5 transition shadow-lg shadow-emerald-900/20 disabled:opacity-40"
+                        >
+                          {isSendingWhatsAppVideo ? (
+                            <RefreshCw size={13} className="animate-spin" />
+                          ) : (
+                            <MessageCircle size={14} />
+                          )}
+                          <span>Disparar WhatsApp</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleSaveVideoToRecords}
+                          className="py-3 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-medium text-xs flex items-center justify-center space-x-1.5 transition border border-white/[0.08]"
+                        >
+                          {savedVideoSuccess ? (
+                            <>
+                              <Check size={14} className="text-emerald-400" />
+                              <span className="text-emerald-400">Salvo!</span>
+                            </>
+                          ) : (
+                            <>
+                              <BookmarkPlus size={14} className="text-zinc-300" />
+                              <span>Salvar Acervo</span>
+                            </>
+                          )}
+                        </button>
+
+                        <a
+                          href={generatedVideoUrl}
+                          download="video_lipsync.mp4"
+                          className="py-3 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium text-xs flex items-center justify-center space-x-1.5 transition border border-white/[0.06]"
+                        >
+                          <Download size={13} />
+                          <span>Baixar MP4</span>
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1635,7 +2173,8 @@ export default function VnTtsStudio() {
               <div className="flex flex-wrap items-center gap-1.5">
                 {[
                   { id: "todos", label: "Todos" },
-                  { id: "voz", label: "🎙️ Voz & Mensagens" },
+                  { id: "voz", label: "🎙️ Voz & Áudios" },
+                  { id: "video", label: "🎬 Vídeos Lip-Sync" },
                   { id: "ideia", label: "💡 Roteiros" },
                   { id: "assistente", label: "📋 Do Assistente" },
                   { id: "geral", label: "📁 Geral" },
@@ -1705,9 +2244,15 @@ export default function VnTtsStudio() {
                           <span className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded-full border ${
                             item.category === "voz"
                               ? "bg-emerald-950/40 border-emerald-500/30 text-emerald-300"
+                              : item.category === "video"
+                              ? "bg-amber-950/40 border-amber-500/30 text-amber-300"
                               : "bg-zinc-800 text-zinc-400 border-white/[0.06]"
                           }`}>
-                            {item.category === "voz" ? "🎙️ Áudio Salvo" : item.category}
+                            {item.category === "voz"
+                              ? "🎙️ Áudio Salvo"
+                              : item.category === "video"
+                              ? "🎬 Vídeo Lip-Sync"
+                              : item.category}
                           </span>
 
                           {item.mood && (
@@ -1743,8 +2288,20 @@ export default function VnTtsStudio() {
                         {item.content}
                       </p>
 
+                      {/* Integrated Video Player (for Saved Lip-Sync Videos) */}
+                      {(item.videoBase64 || item.videoUrl) && (
+                        <div className="rounded-xl overflow-hidden bg-black border border-white/10 mt-3 relative">
+                          <video
+                            src={item.videoBase64 || item.videoUrl}
+                            controls
+                            playsInline
+                            className="w-full max-h-[180px] object-contain bg-black"
+                          />
+                        </div>
+                      )}
+
                       {/* Integrated Audio Player (for Saved Voice Notes) */}
-                      {item.audioBase64 && (
+                      {item.audioBase64 && !item.videoBase64 && (
                         <div className="flex items-center space-x-3 bg-black/50 p-2.5 rounded-xl border border-white/[0.06] mt-3">
                           <button
                             onClick={() => handleToggleRecordAudio(item)}
@@ -1778,7 +2335,22 @@ export default function VnTtsStudio() {
                         {new Date(item.createdAt).toLocaleDateString()}
                       </span>
 
-                      {item.audioBase64 ? (
+                      {item.videoBase64 || item.videoUrl ? (
+                        <button
+                          onClick={() => {
+                            setGeneratedVideoBase64(item.videoBase64 || null);
+                            setGeneratedVideoUrl(item.videoUrl || null);
+                            setVideoText(item.content);
+                            setCurrentTab("video");
+                          }}
+                          className="py-1.5 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-[11px] font-semibold flex items-center space-x-1.5 transition shadow-sm cursor-pointer"
+                          title="Abrir no Estúdio de Vídeo"
+                        >
+                          <Video size={12} className="text-black" />
+                          <span>Abrir no Vídeo Lab</span>
+                          <ArrowRight size={11} />
+                        </button>
+                      ) : item.audioBase64 ? (
                         <button
                           onClick={() => handleDispatchSavedAudio(item)}
                           className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium flex items-center space-x-1.5 transition shadow-sm cursor-pointer"
