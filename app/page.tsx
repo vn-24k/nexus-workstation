@@ -232,10 +232,10 @@ export default function VnTtsStudio() {
   } | null>(null);
 
   // Modo de síntese com o modelo:
+  // "exact-video-voice": Voz e timbre 100% idênticos ao locutor do vídeo (padrão de alta fidelidade)
   // "my-voice-cadence": Minha voz adotando a cadência, tom e sotaque do vídeo
-  // "exact-video-voice": Voz e timbre 100% idênticos ao locutor do vídeo
   // "default": Minha voz padrão
-  const [voiceModelMode, setVoiceModelMode] = useState<"my-voice-cadence" | "exact-video-voice" | "default">("my-voice-cadence");
+  const [voiceModelMode, setVoiceModelMode] = useState<"my-voice-cadence" | "exact-video-voice" | "default">("exact-video-voice");
   const [playingLibraryAudioId, setPlayingLibraryAudioId] = useState<string | null>(null);
   const libraryAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const [isFetchingTranscript, setIsFetchingTranscript] = useState(false);
@@ -494,6 +494,7 @@ export default function VnTtsStudio() {
 
     try {
       const activeSampleB64 = selectedModelAudio?.sampleBase64 || undefined;
+      const activeSampleText = selectedModelAudio?.transcript || "";
       const mode = activeSampleB64 ? voiceModelMode : "default";
 
       const res = await fetch("/api/tts", {
@@ -505,6 +506,7 @@ export default function VnTtsStudio() {
           mood: dispatchMood,
           modelMode: mode,
           referenceAudioBase64: activeSampleB64,
+          referenceAudioText: activeSampleText,
           timestamp: Date.now(),
         }),
       });
@@ -838,9 +840,51 @@ export default function VnTtsStudio() {
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Falha ao extrair áudio do YouTube.");
+      const initialData = await res.json();
+      if (!res.ok || !initialData.ok) {
+        throw new Error(initialData.error || "Falha ao iniciar extração do áudio.");
+      }
+
+      let data = initialData;
+
+      // Se o servidor respondeu com trabalho em segundo plano (evita timeout de 30s para áudios longos)
+      if (initialData.status === "processing" && initialData.jobId) {
+        setMirrorSuccessMsg("Conectando ao YouTube... Processando áudio em segundo plano sem limite de tempo.");
+        const pollStart = Date.now();
+        let jobFinished = false;
+
+        while (!jobFinished && Date.now() - pollStart < 600000) { // Até 10 minutos
+          await new Promise((r) => setTimeout(r, 2000));
+          try {
+            const pollRes = await fetch(`/api/youtube?jobId=${encodeURIComponent(initialData.jobId)}`);
+            if (pollRes.ok) {
+              const pollData = await pollRes.json();
+              if (pollData.ok) {
+                if (pollData.status === "done") {
+                  data = pollData;
+                  jobFinished = true;
+                } else if (pollData.status === "processing") {
+                  if (pollData.progress) {
+                    setMirrorSuccessMsg(`${pollData.progress} (${pollData.percent || 40}%)`);
+                  }
+                } else if (pollData.status === "error") {
+                  throw new Error(pollData.error || "Erro durante o processamento do vídeo.");
+                }
+              } else if (pollData.error) {
+                throw new Error(pollData.error);
+              }
+            }
+          } catch (pollErr: any) {
+            console.warn("Aviso no polling:", pollErr);
+            if (pollErr.message && !pollErr.message.includes("fetch")) {
+              throw pollErr;
+            }
+          }
+        }
+
+        if (!jobFinished) {
+          throw new Error("Tempo limite de processamento excedido após 10 minutos.");
+        }
       }
 
       setYoutubeResult(data);
@@ -855,7 +899,7 @@ export default function VnTtsStudio() {
         setMirrorSuccessMsg(`Áudio de ${data.duration || 'longa duração'} extraído com sucesso! Pronto para salvar ou usar como modelo.`);
       }
 
-      // Se ainda não temos um modelo selecionado, define este como modelo ativo
+      // Se ainda não temos um modelo selecionado, define este como modelo ativo e ativa modo de alta fidelidade
       if (data.sampleBase64 || data.audioBase64) {
         setSelectedModelAudio({
           id: data.id || `yt_${Date.now()}`,
@@ -864,6 +908,7 @@ export default function VnTtsStudio() {
           streamUrl: data.streamUrl || undefined,
           transcript: data.transcript || undefined,
         });
+        setVoiceModelMode("exact-video-voice"); // Timbre e tom 100% idênticos ao áudio extraído!
       }
     } catch (err: any) {
       setYoutubeError(err.message || "Erro ao conectar com o extrator de áudio.");
@@ -961,10 +1006,11 @@ export default function VnTtsStudio() {
       folderName: audio.folderName,
       transcript: audio.transcript,
     });
+    setVoiceModelMode("exact-video-voice"); // Timbre e sotaque idênticos configurados!
     if (audio.transcript) {
       setMirrorText(audio.transcript);
     }
-    setMirrorSuccessMsg(`🎯 Modelo "${audio.title}" ativado! Agora sua voz sintetizará com o tom e sotaque deste áudio.`);
+    setMirrorSuccessMsg(`🎯 Modelo "${audio.title}" ativado com sucesso! Timbre e sotaque idênticos ao áudio configurados.`);
   };
 
   // Reproduzir áudio da biblioteca
@@ -1098,6 +1144,7 @@ export default function VnTtsStudio() {
     setYoutubeError(null);
     try {
       const activeSampleB64 = selectedModelAudio?.sampleBase64 || youtubeResult?.sampleBase64 || youtubeResult?.audioBase64 || undefined;
+      const activeSampleText = selectedModelAudio?.transcript || youtubeResult?.transcript || mirrorText || "";
       const mode = activeSampleB64 ? voiceModelMode : "default";
 
       const res = await fetch("/api/tts", {
@@ -1107,6 +1154,7 @@ export default function VnTtsStudio() {
           text: textToSpeak,
           modelMode: mode,
           referenceAudioBase64: activeSampleB64,
+          referenceAudioText: activeSampleText,
           timestamp: Date.now(),
         }),
       });
@@ -2164,6 +2212,29 @@ export default function VnTtsStudio() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                           <button
                             type="button"
+                            onClick={() => setVoiceModelMode("exact-video-voice")}
+                            className={`p-2.5 rounded-xl border text-left transition flex items-start space-x-2.5 cursor-pointer ${
+                              voiceModelMode === "exact-video-voice"
+                                ? "bg-red-500/20 border-red-400/60 text-white shadow-lg shadow-red-950/40"
+                                : "bg-zinc-900/60 border-white/10 text-zinc-400 hover:text-zinc-200"
+                            }`}
+                          >
+                            <div className={`mt-0.5 w-3 h-3 rounded-full border flex items-center justify-center shrink-0 ${voiceModelMode === "exact-video-voice" ? "border-red-400 bg-red-400" : "border-zinc-500"}`}>
+                              {voiceModelMode === "exact-video-voice" && <div className="w-1 h-1 rounded-full bg-black"></div>}
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                                <span>Voz e Timbre Idênticos ao Vídeo</span>
+                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-red-500/30 text-red-300 font-normal">Recomendado</span>
+                              </div>
+                              <div className="text-[10px] text-zinc-400 leading-tight mt-0.5">
+                                Clonagem acústica direta do locutor do vídeo: timbre, sotaque, tom e acústica 100% idênticos.
+                              </div>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => setVoiceModelMode("my-voice-cadence")}
                             className={`p-2.5 rounded-xl border text-left transition flex items-start space-x-2.5 cursor-pointer ${
                               voiceModelMode === "my-voice-cadence"
@@ -2178,26 +2249,6 @@ export default function VnTtsStudio() {
                               <div className="text-xs font-semibold text-white">Minha Voz + Jeito & Sotaque do Vídeo</div>
                               <div className="text-[10px] text-zinc-400 leading-tight mt-0.5">
                                 Preserva seu timbre autoral de voz, mas adota a cadência, tom, velocidade e malícia do modelo.
-                              </div>
-                            </div>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setVoiceModelMode("exact-video-voice")}
-                            className={`p-2.5 rounded-xl border text-left transition flex items-start space-x-2.5 cursor-pointer ${
-                              voiceModelMode === "exact-video-voice"
-                                ? "bg-red-500/20 border-red-400/60 text-white shadow-lg shadow-red-950/40"
-                                : "bg-zinc-900/60 border-white/10 text-zinc-400 hover:text-zinc-200"
-                            }`}
-                          >
-                            <div className={`mt-0.5 w-3 h-3 rounded-full border flex items-center justify-center shrink-0 ${voiceModelMode === "exact-video-voice" ? "border-red-400 bg-red-400" : "border-zinc-500"}`}>
-                              {voiceModelMode === "exact-video-voice" && <div className="w-1 h-1 rounded-full bg-black"></div>}
-                            </div>
-                            <div>
-                              <div className="text-xs font-semibold text-white">Voz e Timbre Idênticos ao Vídeo</div>
-                              <div className="text-[10px] text-zinc-400 leading-tight mt-0.5">
-                                Clonagem acústica direta do locutor do vídeo, reproduzindo 100% o timbre original com fidelidade.
                               </div>
                             </div>
                           </button>

@@ -18,6 +18,41 @@ function getBridgeUrl(custom?: string): string {
   return (process.env.WHATSAPP_BRIDGE_URL || "https://always-chairs-evaluated-flyer.trycloudflare.com").replace(/\/$/, "");
 }
 
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const jobId = searchParams.get("jobId");
+    const bridgeUrl = searchParams.get("bridgeUrl") || undefined;
+
+    if (!jobId) {
+      return NextResponse.json({ ok: false, error: "Parâmetro jobId é obrigatório." }, { status: 400 });
+    }
+
+    const targetBridge = getBridgeUrl(bridgeUrl);
+
+    const bridgeRes = await fetch(`${targetBridge}/youtube-status?jobId=${encodeURIComponent(jobId)}`, {
+      method: "GET",
+      cache: "no-store",
+    });
+
+    if (!bridgeRes.ok) {
+      const errData = await bridgeRes.json().catch(() => ({ error: `Falha HTTP ${bridgeRes.status}` }));
+      return NextResponse.json({ ok: false, error: errData.error || "Falha ao verificar status do áudio." }, { status: bridgeRes.status });
+    }
+
+    const data = await bridgeRes.json();
+    if (data.streamUrl && !data.streamUrl.startsWith("http")) {
+      data.streamUrl = `${targetBridge}${data.streamUrl}`;
+    }
+    if (data.sampleUrl && !data.sampleUrl.startsWith("http")) {
+      data.sampleUrl = `${targetBridge}${data.sampleUrl}`;
+    }
+    return NextResponse.json(data);
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: err.message || "Erro ao consultar status da extração." }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();

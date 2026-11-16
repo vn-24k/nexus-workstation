@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
       text,
       modelMode = "default", // 'default' | 'my-voice-cadence' | 'exact-video-voice'
       referenceAudioBase64,
+      referenceAudioText,
       referenceId,
       temperature = 0.85,
       top_p = 0.88
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
         references: [
           {
             audio: sampleBytes,
-            text: "",
+            text: referenceAudioText ? String(referenceAudioText).trim() : "",
           }
         ]
       };
