@@ -28,6 +28,12 @@ import {
   Copy,
   Radio,
   ArrowRight,
+  Youtube,
+  Link as LinkIcon,
+  Clock,
+  Scissors,
+  Headphones,
+  ExternalLink,
 } from "lucide-react";
 
 interface VoiceAnchor {
@@ -145,6 +151,28 @@ export default function VnTtsStudio() {
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
+
+  // YouTube Audio Extraction & Mirroring State
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [youtubeStart, setYoutubeStart] = useState("00:00");
+  const [youtubeEnd, setYoutubeEnd] = useState("00:30");
+  const [isExtractingYoutube, setIsExtractingYoutube] = useState(false);
+  const [youtubeResult, setYoutubeResult] = useState<{
+    title: string;
+    duration: string;
+    thumbnail: string;
+    sizeKb: number;
+    audioBase64: string;
+  } | null>(null);
+  const [youtubeError, setYoutubeError] = useState<string | null>(null);
+  const [isPlayingYoutubeAudio, setIsPlayingYoutubeAudio] = useState(false);
+  const youtubeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [mirrorText, setMirrorText] = useState("");
+  const [isSynthesizingMirror, setIsSynthesizingMirror] = useState(false);
+  const [mirrorAudioUrl, setMirrorAudioUrl] = useState<string | null>(null);
+  const [isPlayingMirrorAudio, setIsPlayingMirrorAudio] = useState(false);
+  const mirrorAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [mirrorSuccessMsg, setMirrorSuccessMsg] = useState<string | null>(null);
 
   // Records / Acervo
   const [records, setRecords] = useState<RecordNote[]>([]);
@@ -684,6 +712,139 @@ export default function VnTtsStudio() {
 
   const handleDeleteAnchor = (id: string) => {
     setVoiceAnchors((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  // YouTube Audio Extraction & Cadence Mirroring Handlers
+  const handleExtractYoutube = async () => {
+    if (!youtubeUrl || !youtubeUrl.trim()) {
+      setYoutubeError("Cole um link do YouTube para extrair.");
+      return;
+    }
+    setIsExtractingYoutube(true);
+    setYoutubeError(null);
+    setYoutubeResult(null);
+    setMirrorAudioUrl(null);
+    setMirrorSuccessMsg(null);
+
+    try {
+      const res = await fetch("/api/youtube", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: youtubeUrl.trim(),
+          start: youtubeStart.trim() || "0",
+          end: youtubeEnd.trim() || "30",
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Falha ao extrair áudio do YouTube.");
+      }
+
+      setYoutubeResult(data);
+      setMirrorText(data.title ? `Fala espelhada: ${data.title}` : "");
+    } catch (err: any) {
+      setYoutubeError(err.message || "Erro ao conectar com o extrator de áudio.");
+    } finally {
+      setIsExtractingYoutube(false);
+    }
+  };
+
+  const handleToggleYoutubeAudio = () => {
+    if (!youtubeResult?.audioBase64) return;
+    if (isPlayingYoutubeAudio) {
+      youtubeAudioRef.current?.pause();
+      setIsPlayingYoutubeAudio(false);
+    } else {
+      if (youtubeAudioRef.current) {
+        youtubeAudioRef.current.pause();
+      }
+      youtubeAudioRef.current = new Audio(youtubeResult.audioBase64);
+      youtubeAudioRef.current.onended = () => setIsPlayingYoutubeAudio(false);
+      youtubeAudioRef.current.onerror = () => setIsPlayingYoutubeAudio(false);
+      youtubeAudioRef.current.play();
+      setIsPlayingYoutubeAudio(true);
+    }
+  };
+
+  const handleSynthesizeMirror = async () => {
+    const textToSpeak = mirrorText.trim() || youtubeResult?.title || "";
+    if (!textToSpeak) {
+      setYoutubeError("Digite um texto ou roteiro para espelhar com sua voz.");
+      return;
+    }
+
+    setIsSynthesizingMirror(true);
+    setYoutubeError(null);
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: textToSpeak, timestamp: Date.now() }),
+      });
+
+      if (!res.ok) throw new Error("Erro na síntese vocal.");
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setMirrorAudioUrl(url);
+      setMirrorSuccessMsg("Áudio sintetizado com sua voz espelhando este modelo!");
+
+      if (mirrorAudioRef.current) mirrorAudioRef.current.pause();
+      const audio = new Audio(url);
+      mirrorAudioRef.current = audio;
+      audio.onended = () => setIsPlayingMirrorAudio(false);
+      audio.onerror = () => setIsPlayingMirrorAudio(false);
+      audio.play();
+      setIsPlayingMirrorAudio(true);
+    } catch (err: any) {
+      setYoutubeError(err.message || "Falha na síntese vocal.");
+    } finally {
+      setIsSynthesizingMirror(false);
+    }
+  };
+
+  const handleToggleMirrorAudio = () => {
+    if (!mirrorAudioUrl) return;
+    if (isPlayingMirrorAudio) {
+      mirrorAudioRef.current?.pause();
+      setIsPlayingMirrorAudio(false);
+    } else {
+      if (mirrorAudioRef.current) mirrorAudioRef.current.pause();
+      const audio = new Audio(mirrorAudioUrl);
+      mirrorAudioRef.current = audio;
+      audio.onended = () => setIsPlayingMirrorAudio(false);
+      audio.onerror = () => setIsPlayingMirrorAudio(false);
+      audio.play();
+      setIsPlayingMirrorAudio(true);
+    }
+  };
+
+  const handleSendYoutubeToDispatch = () => {
+    const textToSend = mirrorText.trim() || youtubeResult?.title || "";
+    handleDispatchTextChange(textToSend);
+    setCurrentTab("dispatch");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleSaveYoutubeAnchor = () => {
+    if (!youtubeResult) return;
+    const newAnchor: VoiceAnchor = {
+      id: `anchor_yt_${Date.now()}`,
+      name: `[YouTube] ${youtubeResult.title.substring(0, 32)}...`,
+      mood: "empolgado",
+      accent: "sp",
+      audioUrl: youtubeResult.audioBase64,
+      duration: youtubeResult.duration || "0:30",
+      createdAt: new Date().toISOString(),
+      energy: "Alta (YouTube)",
+      confidence: 96,
+      aiAnalysis: `Amostra extraída do YouTube (${youtubeResult.duration || "30s"}). Modelo acústico calibrado para espelhamento vocal.`,
+    };
+
+    setVoiceAnchors((prev) => [newAnchor, ...prev]);
+    setMirrorSuccessMsg("Modelo do YouTube salvo com sucesso na Galeria de Âncoras!");
   };
 
   // Quick Action: Use Record content directly in Vocal Dispatch
@@ -1389,6 +1550,243 @@ export default function VnTtsStudio() {
                 <span className="text-zinc-600">•</span>
                 <span className="text-zinc-400 font-mono">{voiceAnchors.length} Amostras Salvas</span>
               </div>
+            </div>
+
+            {/* ESPELHAMENTO & EXTRAÇÃO DO YOUTUBE */}
+            <div className="apple-glass rounded-3xl p-6 sm:p-7 space-y-5 border border-red-500/20 bg-gradient-to-b from-red-950/10 via-zinc-900/60 to-zinc-950/80">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-red-600/20 border border-red-500/30 flex items-center justify-center text-red-400">
+                    <Youtube size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
+                      Espelhamento de Cadência via YouTube
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-300 font-normal">
+                        Novo
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-zinc-400">
+                      Cole um link para capturar o estilo de fala, ritmo e entonação de qualquer vídeo.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* YouTube Input Form */}
+              <div className="space-y-3">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={youtubeUrl}
+                    onChange={(e) => {
+                      setYoutubeUrl(e.target.value);
+                      if (youtubeError) setYoutubeError(null);
+                    }}
+                    placeholder="Cole o link do YouTube (ex: https://youtube.com/watch?v=... ou youtu.be/...)"
+                    className="w-full bg-zinc-900/90 border border-white/10 rounded-2xl pl-10 pr-4 py-3 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/50 transition"
+                  />
+                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500">
+                    <LinkIcon size={14} />
+                  </div>
+                </div>
+
+                {/* Timing controls */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                  <div className="flex items-center space-x-3 text-[11px]">
+                    <span className="text-zinc-400 flex items-center space-x-1">
+                      <Clock size={12} className="text-zinc-500" />
+                      <span>Início:</span>
+                    </span>
+                    <input
+                      type="text"
+                      value={youtubeStart}
+                      onChange={(e) => setYoutubeStart(e.target.value)}
+                      placeholder="00:00"
+                      className="w-16 bg-zinc-900 border border-white/10 rounded-lg px-2 py-1 text-center font-mono text-xs text-white focus:outline-none focus:border-red-500/50"
+                    />
+
+                    <span className="text-zinc-400 flex items-center space-x-1 pl-2">
+                      <Scissors size={12} className="text-zinc-500" />
+                      <span>Fim:</span>
+                    </span>
+                    <input
+                      type="text"
+                      value={youtubeEnd}
+                      onChange={(e) => setYoutubeEnd(e.target.value)}
+                      placeholder="00:30"
+                      className="w-16 bg-zinc-900 border border-white/10 rounded-lg px-2 py-1 text-center font-mono text-xs text-white focus:outline-none focus:border-red-500/50"
+                    />
+                    <span className="text-[10px] text-zinc-500 hidden sm:inline">(Janela de até 60s)</span>
+                  </div>
+
+                  <button
+                    onClick={handleExtractYoutube}
+                    disabled={isExtractingYoutube || !youtubeUrl.trim()}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-medium text-xs flex items-center space-x-2 shadow-lg shadow-red-950/40 hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer disabled:opacity-40"
+                  >
+                    {isExtractingYoutube ? (
+                      <>
+                        <RefreshCw size={13} className="animate-spin" />
+                        <span>Extraindo Áudio...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Youtube size={13} />
+                        <span>Extrair Áudio & Estilo</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Error Banner */}
+                {youtubeError && (
+                  <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/30 text-xs text-red-300 flex items-center space-x-2 animate-in fade-in">
+                    <AlertCircle size={14} className="shrink-0 text-red-400" />
+                    <span>{youtubeError}</span>
+                  </div>
+                )}
+
+                {/* Success Banner */}
+                {mirrorSuccessMsg && (
+                  <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-300 flex items-center space-x-2 animate-in fade-in">
+                    <CheckCircle2 size={14} className="shrink-0 text-emerald-400" />
+                    <span>{mirrorSuccessMsg}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* YouTube Extracted Result Card */}
+              {youtubeResult && (
+                <div className="pt-3 border-t border-white/[0.08] space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-zinc-900/90 border border-white/10">
+                    <div className="flex items-center space-x-3">
+                      {youtubeResult.thumbnail ? (
+                        <img
+                          src={youtubeResult.thumbnail}
+                          alt="Thumbnail"
+                          className="w-14 h-10 object-cover rounded-lg border border-white/10 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-14 h-10 rounded-lg bg-red-950/40 border border-red-500/20 flex items-center justify-center shrink-0">
+                          <Youtube size={18} className="text-red-400" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-medium text-white truncate max-w-sm">
+                          {youtubeResult.title}
+                        </div>
+                        <div className="flex items-center space-x-2 text-[10px] text-zinc-400 mt-0.5">
+                          {youtubeResult.duration && (
+                            <>
+                              <span>Duração: {youtubeResult.duration}</span>
+                              <span>•</span>
+                            </>
+                          )}
+                          <span>Tamanho: {youtubeResult.sizeKb} KB</span>
+                          <span>•</span>
+                          <span className="text-emerald-400 font-medium">Amostra Acústica Pronta</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Original Audio Play Button */}
+                    <button
+                      onClick={handleToggleYoutubeAudio}
+                      className="px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 hover:text-white flex items-center space-x-1.5 transition self-start sm:self-auto cursor-pointer"
+                    >
+                      {isPlayingYoutubeAudio ? (
+                        <>
+                          <Pause size={12} fill="currentColor" />
+                          <span>Pausar Original</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play size={12} fill="currentColor" />
+                          <span>Ouvir Amostra</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Mirroring & Synthesis Box */}
+                  <div className="p-4 rounded-2xl bg-zinc-900/60 border border-white/[0.08] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-zinc-300 flex items-center space-x-1.5">
+                        <Sparkles size={12} className="text-amber-400" />
+                        <span>Sintetizar Roteiro com Minha Voz (Espelhando Cadência)</span>
+                      </span>
+                    </div>
+
+                    <textarea
+                      value={mirrorText}
+                      onChange={(e) => setMirrorText(e.target.value)}
+                      placeholder="Digite o texto que deseja falar com sua voz espelhando esse estilo..."
+                      rows={2}
+                      className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white/30 resize-none transition"
+                    />
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <div className="flex items-center space-x-2">
+                        {mirrorAudioUrl && (
+                          <button
+                            onClick={handleToggleMirrorAudio}
+                            className="px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs flex items-center space-x-1.5 hover:bg-amber-500/30 transition cursor-pointer"
+                          >
+                            {isPlayingMirrorAudio ? (
+                              <>
+                                <Pause size={12} fill="currentColor" />
+                                <span>Pausar Minha Voz</span>
+                              </>
+                            ) : (
+                              <>
+                                <Play size={12} fill="currentColor" />
+                                <span>Ouvir Minha Voz</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={handleSaveYoutubeAnchor}
+                          className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 hover:text-white transition cursor-pointer flex items-center space-x-1"
+                        >
+                          <BookmarkPlus size={12} />
+                          <span>Salvar no Acervo</span>
+                        </button>
+
+                        <button
+                          onClick={handleSendYoutubeToDispatch}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/40 border border-emerald-500/40 text-xs text-emerald-300 transition cursor-pointer flex items-center space-x-1"
+                        >
+                          <ArrowRight size={12} />
+                          <span>Enviar p/ Disparo</span>
+                        </button>
+
+                        <button
+                          onClick={handleSynthesizeMirror}
+                          disabled={isSynthesizingMirror}
+                          className="px-4 py-1.5 rounded-xl bg-white hover:bg-zinc-200 text-black font-semibold text-xs flex items-center space-x-1.5 shadow-md transition cursor-pointer disabled:opacity-40"
+                        >
+                          {isSynthesizingMirror ? (
+                            <>
+                              <RefreshCw size={12} className="animate-spin" />
+                              <span>Sintetizando...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 size={12} />
+                              <span>Gerar com Minha Voz</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Recording & Input Station */}
