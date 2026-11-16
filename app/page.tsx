@@ -44,7 +44,15 @@ import {
   FileAudio,
   CheckCheck,
   Database,
+  BookOpen,
+  Briefcase,
+  Scale,
+  Target,
+  Heart,
+  ChevronRight,
+  BookMarked,
 } from "lucide-react";
+import lexiconData from "@/lib/lexicon_data.json";
 
 interface LibraryFolder {
   id: string;
@@ -126,8 +134,8 @@ export default function VnTtsStudio() {
   const [loginPass, setLoginPass] = useState("");
   const [loginError, setLoginError] = useState("");
 
-  // Navigation: assistant | dispatch | voice | records
-  const [currentTab, setCurrentTab] = useState<"assistant" | "dispatch" | "voice" | "records">("dispatch");
+  // Navigation: assistant | dispatch | voice | records | lexicon
+  const [currentTab, setCurrentTab] = useState<"assistant" | "dispatch" | "voice" | "records" | "lexicon">("dispatch");
 
   // Chat
   const [messages, setMessages] = useState<Message[]>([]);
@@ -259,6 +267,66 @@ export default function VnTtsStudio() {
   const [isSavingGeneratedAudio, setIsSavingGeneratedAudio] = useState(false);
   const [generatedAudioCustomTitle, setGeneratedAudioCustomTitle] = useState("");
   const [generatedAudioTargetFolder, setGeneratedAudioTargetFolder] = useState("vozes-geradas");
+
+  // Lexicon & Speech Styles (Dicionário de Gírias SP + Biblioteca Técnica/Profissional)
+  const [selectedSpeechStyle, setSelectedSpeechStyle] = useState<"sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo">("sp_quebrada");
+  const [isTransformingText, setIsTransformingText] = useState(false);
+  const [lexiconDomain, setLexiconDomain] = useState<"girias_sp" | "tecnico_profissional" | "transformacoes" | "dialogos">("girias_sp");
+  const [lexiconCategory, setLexiconCategory] = useState<string>("todos");
+  const [lexiconSearch, setLexiconSearch] = useState("");
+  const [copiedTermId, setCopiedTermId] = useState<string | null>(null);
+
+  // Mapeamento de estilo para mood do motor
+  const handleSelectSpeechStyle = (style: "sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo") => {
+    setSelectedSpeechStyle(style);
+    if (style === "sp_quebrada") setDispatchMood("sp");
+    else if (style === "executivo" || style === "tecnico_juridico") setDispatchMood("firme");
+    else if (style === "persuasao") setDispatchMood("empolgado");
+    else if (style === "afetivo") setDispatchMood("calmo");
+  };
+
+  // Transformar texto para o estilo selecionado
+  const handleTransformDispatchText = async (targetStyle?: string) => {
+    const styleToUse = targetStyle || selectedSpeechStyle;
+    const currentText = dispatchText.trim();
+    if (!currentText || isTransformingText) return;
+
+    setIsTransformingText(true);
+    try {
+      const res = await fetch("/api/lexicon/transform", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: currentText, style: styleToUse }),
+      });
+      const data = await res.json();
+      if (data.ok && data.adapted) {
+        handleDispatchTextChange(data.adapted);
+      }
+    } catch (e) {
+      console.error("Erro ao transformar texto:", e);
+    } finally {
+      setIsTransformingText(false);
+    }
+  };
+
+  // Inserir termo ou frase no editor de fala e navegar para o disparo
+  const handleInsertToDispatch = (textToInsert: string, mode: "replace" | "append" = "replace") => {
+    if (mode === "replace") {
+      handleDispatchTextChange(textToInsert);
+    } else {
+      const current = dispatchText.trim();
+      const updated = current ? `${current} ${textToInsert}` : textToInsert;
+      handleDispatchTextChange(updated);
+    }
+    setCurrentTab("dispatch");
+  };
+
+  // Copiar termo para a área de transferência
+  const handleCopyTerm = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedTermId(id);
+    setTimeout(() => setCopiedTermId(null), 2000);
+  };
 
   // Records / Acervo
   const [records, setRecords] = useState<RecordNote[]>([]);
@@ -1598,14 +1666,20 @@ export default function VnTtsStudio() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
             </button>
             <button
-              onClick={() => setCurrentTab("assistant")}
-              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 shrink-0 ${
-                currentTab === "assistant"
+              onClick={() => setCurrentTab("lexicon")}
+              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 shrink-0 flex items-center space-x-1.5 ${
+                currentTab === "lexicon"
                   ? "bg-white text-black font-medium shadow-sm"
                   : "text-zinc-400 hover:text-white"
               }`}
             >
-              Assistente
+              <BookOpen size={12} className={currentTab === "lexicon" ? "text-amber-600" : "text-amber-400"} />
+              <span>Estilos & Gírias</span>
+              <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-medium ${
+                currentTab === "lexicon" ? "bg-black/10 text-black" : "bg-amber-500/20 text-amber-300"
+              }`}>
+                530
+              </span>
             </button>
             <button
               onClick={() => setCurrentTab("voice")}
@@ -1615,7 +1689,7 @@ export default function VnTtsStudio() {
                   : "text-zinc-400 hover:text-white"
               }`}
             >
-              Voz Real
+              Voz Real & Modelos
             </button>
             <button
               onClick={() => setCurrentTab("records")}
@@ -1626,6 +1700,16 @@ export default function VnTtsStudio() {
               }`}
             >
               Acervo
+            </button>
+            <button
+              onClick={() => setCurrentTab("assistant")}
+              className={`px-3.5 py-1.5 rounded-full transition-all duration-200 shrink-0 ${
+                currentTab === "assistant"
+                  ? "bg-white text-black font-medium shadow-sm"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              Assistente
             </button>
           </nav>
 
@@ -1727,51 +1811,171 @@ export default function VnTtsStudio() {
               )}
             </div>
 
-            {/* Text & Tone Input Card */}
+            {/* Text & Speech Style Input Card (Integrado com o Dicionário SP & Biblioteca Técnica) */}
             <div className="apple-glass rounded-3xl p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <label className="text-[11px] font-medium text-zinc-400">
-                  O que você quer falar?
-                </label>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-white/5">
+                <div>
+                  <label className="text-[11px] font-semibold text-white block">
+                    Como você prefere falar este áudio?
+                  </label>
+                  <p className="text-[10px] text-zinc-400">
+                    Selecione o registro vocal e o vocabulário para sua voz clonada reproduzir.
+                  </p>
+                </div>
 
-                {/* Mood Select */}
-                <select
-                  value={dispatchMood}
-                  onChange={(e) => setDispatchMood(e.target.value)}
-                  className="bg-zinc-900/80 border border-white/10 rounded-xl px-3 py-1.5 text-[11px] text-zinc-300 focus:outline-none"
+                <button
+                  type="button"
+                  onClick={() => setCurrentTab("lexicon")}
+                  className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center space-x-1 cursor-pointer self-start sm:self-auto py-1 px-2 rounded-lg bg-amber-500/10 border border-amber-500/20 transition"
                 >
-                  <option value="sp">Padrão São Paulo</option>
-                  <option value="firme">Firme / Autoridade</option>
-                  <option value="calmo">Calmo / Afeto</option>
-                  <option value="empolgado">Empolgado / Energia</option>
-                  <option value="carioca">Carioca</option>
-                  <option value="baiano">Baiano</option>
-                </select>
+                  <BookOpen size={12} />
+                  <span>Dicionário Completo (530 termos)</span>
+                  <ChevronRight size={11} />
+                </button>
               </div>
 
-              <textarea
-                rows={3}
-                value={dispatchText}
-                onChange={(e) => handleDispatchTextChange(e.target.value)}
-                placeholder="Digite sua fala como você falaria... (ex: 'Oi, tudo bem? Tô saindo agora do estúdio e te ligo em 10 minutos...')"
-                className="w-full bg-zinc-900/70 border border-white/10 rounded-2xl p-4 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 transition resize-none leading-relaxed"
-              />
-
-              {/* Quick Preset Phrases */}
-              <div className="flex flex-wrap gap-1.5">
+              {/* Seletor de Estilos de Fala (5 Modos Vocais) */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 pt-0.5">
                 {[
-                  "Tô na correria aqui, já já te ligo!",
-                  "Oi amor, bom dia! Como você tá?",
-                  "Recebi aqui, tô analisando e te aviso.",
-                ].map((phrase, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleDispatchTextChange(phrase)}
-                    className="px-2.5 py-1 rounded-full bg-zinc-900/60 hover:bg-zinc-800 border border-white/[0.04] text-[10px] text-zinc-400 hover:text-white transition"
-                  >
-                    {phrase}
-                  </button>
-                ))}
+                  { id: "sp_quebrada", label: "Gírias SP", desc: "Malandragem & Rua", icon: Zap, activeClass: "bg-amber-500/20 border-amber-400/70 text-amber-300 shadow-lg shadow-amber-950/40" },
+                  { id: "executivo", label: "Executivo", desc: "Diretoria & Alinhamento", icon: Briefcase, activeClass: "bg-blue-500/20 border-blue-400/70 text-blue-300 shadow-lg shadow-blue-950/40" },
+                  { id: "tecnico_juridico", label: "Culto & Técnico", desc: "Jurídico & Analítico", icon: Scale, activeClass: "bg-purple-500/20 border-purple-400/70 text-purple-300 shadow-lg shadow-purple-950/40" },
+                  { id: "persuasao", label: "Persuasão", desc: "Vendas & Impacto", icon: Target, activeClass: "bg-emerald-500/20 border-emerald-400/70 text-emerald-300 shadow-lg shadow-emerald-950/40" },
+                  { id: "afetivo", label: "Afetivo", desc: "Carinho & Família", icon: Heart, activeClass: "bg-rose-500/20 border-rose-400/70 text-rose-300 shadow-lg shadow-rose-950/40" },
+                ].map((style) => {
+                  const Icon = style.icon;
+                  const isSelected = selectedSpeechStyle === style.id;
+                  return (
+                    <button
+                      key={style.id}
+                      type="button"
+                      onClick={() => handleSelectSpeechStyle(style.id as any)}
+                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                        isSelected
+                          ? style.activeClass
+                          : "bg-zinc-900/50 border-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+                      }`}
+                    >
+                      <div className="flex items-center space-x-1.5">
+                        <Icon size={12} className={isSelected ? "" : "text-zinc-500"} />
+                        <span className="text-[11px] truncate font-semibold">{style.label}</span>
+                      </div>
+                      <span className="text-[9px] text-zinc-500 truncate mt-1">{style.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Textarea de Roteiro */}
+              <div className="space-y-1.5">
+                <textarea
+                  rows={3}
+                  value={dispatchText}
+                  onChange={(e) => handleDispatchTextChange(e.target.value)}
+                  placeholder={
+                    selectedSpeechStyle === "sp_quebrada"
+                      ? "Escreva a mensagem com suas palavras ou digite livremente para adaptar com gírias de SP..."
+                      : selectedSpeechStyle === "executivo"
+                      ? "Digite a mensagem para receber a versão executiva com termos corporativos e alinhamento..."
+                      : selectedSpeechStyle === "tecnico_juridico"
+                      ? "Digite a mensagem para transformar em vocabulário culto, inequívoco e analítico..."
+                      : selectedSpeechStyle === "persuasao"
+                      ? "Digite os pontos principais para transformar em argumento persuasivo de alto impacto..."
+                      : "Digite a mensagem de carinho ou afeto para quem você ama..."
+                  }
+                  className="w-full bg-zinc-900/70 border border-white/10 rounded-2xl p-4 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 transition resize-none leading-relaxed"
+                />
+
+                {/* Barra de Ações do Roteiro */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => handleTransformDispatchText()}
+                      disabled={isTransformingText || !dispatchText.trim()}
+                      className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-amber-600/20 hover:from-amber-500/30 hover:to-amber-600/30 border border-amber-500/40 text-amber-300 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer disabled:opacity-40"
+                    >
+                      {isTransformingText ? (
+                        <>
+                          <RefreshCw size={12} className="animate-spin text-amber-400" />
+                          <span>Adaptando ao estilo...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={12} className="text-amber-400" />
+                          <span>Adaptar Frase para este Estilo</span>
+                        </>
+                      )}
+                    </button>
+
+                    {dispatchText && (
+                      <button
+                        type="button"
+                        onClick={() => handleDispatchTextChange("")}
+                        className="text-[11px] text-zinc-500 hover:text-zinc-300 px-2 py-1 transition cursor-pointer"
+                      >
+                        Limpar
+                      </button>
+                    )}
+                  </div>
+
+                  <span className="text-[10px] text-zinc-500">
+                    {dispatchText.length} caracteres
+                  </span>
+                </div>
+              </div>
+
+              {/* Frases Prontas do Estilo Selecionado */}
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[10px] font-medium text-zinc-400 block">
+                  Frases Prontas Recomendadas ({
+                    selectedSpeechStyle === "sp_quebrada" ? "São Paulo & Quebrada" :
+                    selectedSpeechStyle === "executivo" ? "Corporativo" :
+                    selectedSpeechStyle === "tecnico_juridico" ? "Culto / Analítico" :
+                    selectedSpeechStyle === "persuasao" ? "Persuasão" : "Familiar"
+                  }):
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(lexiconData.quickPresets.find((p) => p.id === selectedSpeechStyle)?.phrases || []).map((phrase, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => handleDispatchTextChange(phrase)}
+                      className="px-2.5 py-1 rounded-xl bg-zinc-900/60 hover:bg-zinc-800 border border-white/[0.05] text-[10px] text-zinc-300 hover:text-white transition text-left cursor-pointer"
+                    >
+                      "{phrase.length > 55 ? `${phrase.substring(0, 55)}...` : phrase}"
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Termos & Gírias para Injetar no Roteiro */}
+              <div className="space-y-1.5 pt-0.5">
+                <span className="text-[10px] font-medium text-zinc-400 block">
+                  Clique para Injetar Termo na Fala:
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {(
+                    selectedSpeechStyle === "sp_quebrada"
+                      ? ["se liga na fita", "demorô", "pode pá", "sem neurose", "papo reto", "da hora", "proceder", "cria", "na correria", "suave"]
+                      : selectedSpeechStyle === "executivo"
+                      ? ["prezado", "alinhar diretrizes", "impreterivelmente", "subsidiar decisão", "prioritário", "oportunidade substancial"]
+                      : selectedSpeechStyle === "tecnico_juridico"
+                      ? ["inequívoco", "premissa fundamental", "corroborar", "discrepância", "ponderar", "contundente"]
+                      : selectedSpeechStyle === "persuasao"
+                      ? ["oportunidade incontestável", "retorno substancial", "momento ideal", "transformação contundente"]
+                      : ["meu bem", "um beijo no coração", "de coração", "te amo muito", "fica com Deus"]
+                  ).map((term, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => handleInsertToDispatch(term, "append")}
+                      className="px-2 py-0.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.06] text-[10px] text-zinc-400 hover:text-white transition cursor-pointer"
+                    >
+                      + {term}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Action Buttons: Direct Dispatch & Preview */}
@@ -3244,6 +3448,424 @@ export default function VnTtsStudio() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 5: LÉXICO & ESTILOS VOCAIS (DICIONÁRIO SP + BIBLIOTECA TÉCNICA/PROFISSIONAL) */}
+        {currentTab === "lexicon" && (
+          <div className="max-w-4xl mx-auto w-full space-y-6 py-2 animate-in fade-in duration-200">
+            {/* Header & Badges */}
+            <div className="apple-glass rounded-3xl p-6 sm:p-7 space-y-4 border border-white/10 bg-zinc-950/60">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                    <BookOpen size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                      Acervo Linguístico & Registros de Fala
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium">
+                        530 Termos
+                      </span>
+                    </h2>
+                    <p className="text-xs text-zinc-400">
+                      Gírias autênticas de São Paulo e vocabulário técnico/executivo para orientar o tom da sua voz.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setCurrentTab("dispatch")}
+                  className="px-3.5 py-2 rounded-xl bg-white text-black text-xs font-semibold hover:bg-zinc-200 transition cursor-pointer flex items-center space-x-1.5 self-start sm:self-auto shrink-0"
+                >
+                  <Mic size={13} />
+                  <span>Ir para Disparo Vocal</span>
+                  <ArrowRight size={12} />
+                </button>
+              </div>
+
+              {/* Estatísticas do Acervo */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-white/5">
+                <div className="p-3 rounded-2xl bg-zinc-900/60 border border-white/5">
+                  <span className="text-[10px] text-zinc-500 block uppercase tracking-wider">Gírias Paulistanas</span>
+                  <span className="text-base font-bold text-amber-400">395 termos</span>
+                  <span className="text-[10px] text-zinc-400 block mt-0.5">17 partes temáticas</span>
+                </div>
+                <div className="p-3 rounded-2xl bg-zinc-900/60 border border-white/5">
+                  <span className="text-[10px] text-zinc-500 block uppercase tracking-wider">Profissional & Técnico</span>
+                  <span className="text-base font-bold text-blue-400">135 termos</span>
+                  <span className="text-[10px] text-zinc-400 block mt-0.5">16 seções formais</span>
+                </div>
+                <div className="p-3 rounded-2xl bg-zinc-900/60 border border-white/5">
+                  <span className="text-[10px] text-zinc-500 block uppercase tracking-wider">Transformações</span>
+                  <span className="text-base font-bold text-emerald-400">6 situações</span>
+                  <span className="text-[10px] text-zinc-400 block mt-0.5">Direto vs Executivo</span>
+                </div>
+                <div className="p-3 rounded-2xl bg-zinc-900/60 border border-white/5">
+                  <span className="text-[10px] text-zinc-500 block uppercase tracking-wider">Diálogos de Rua</span>
+                  <span className="text-base font-bold text-purple-400">7 diálogos</span>
+                  <span className="text-[10px] text-zinc-400 block mt-0.5">Padrão SP 100% real</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Navegação de Domínios do Acervo */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              {/* Abas dos Domínios */}
+              <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => { setLexiconDomain("girias_sp"); setLexiconCategory("todos"); }}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer flex items-center space-x-1.5 ${
+                    lexiconDomain === "girias_sp"
+                      ? "bg-amber-500 text-black shadow-md shadow-amber-500/20"
+                      : "bg-zinc-900 text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <Zap size={13} />
+                  <span>Gírias de SP & Quebrada (395)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setLexiconDomain("tecnico_profissional"); setLexiconCategory("todos"); }}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer flex items-center space-x-1.5 ${
+                    lexiconDomain === "tecnico_profissional"
+                      ? "bg-blue-500 text-black shadow-md shadow-blue-500/20"
+                      : "bg-zinc-900 text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <Briefcase size={13} />
+                  <span>Profissional & Técnico (135)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setLexiconDomain("transformacoes"); setLexiconCategory("todos"); }}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer flex items-center space-x-1.5 ${
+                    lexiconDomain === "transformacoes"
+                      ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
+                      : "bg-zinc-900 text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <Sparkles size={13} />
+                  <span>Modelos de Transformação</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setLexiconDomain("dialogos"); setLexiconCategory("todos"); }}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer flex items-center space-x-1.5 ${
+                    lexiconDomain === "dialogos"
+                      ? "bg-purple-500 text-black shadow-md shadow-purple-500/20"
+                      : "bg-zinc-900 text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <MessageCircle size={13} />
+                  <span>Diálogos Paulistanos</span>
+                </button>
+              </div>
+
+              {/* Barra de Pesquisa */}
+              {(lexiconDomain === "girias_sp" || lexiconDomain === "tecnico_profissional") && (
+                <div className="relative min-w-[220px]">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={lexiconSearch}
+                    onChange={(e) => setLexiconSearch(e.target.value)}
+                    placeholder="Buscar gíria, significado ou exemplo..."
+                    className="w-full bg-zinc-900/90 border border-white/10 rounded-xl pl-8 pr-7 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-400 transition"
+                  />
+                  {lexiconSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setLexiconSearch("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Pílulas de Categorias (Filtragem por Partes) */}
+            {(lexiconDomain === "girias_sp" || lexiconDomain === "tecnico_profissional") && (
+              <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => setLexiconCategory("todos")}
+                  className={`px-3 py-1.5 rounded-xl text-[11px] font-medium whitespace-nowrap transition cursor-pointer ${
+                    lexiconCategory === "todos"
+                      ? "bg-white text-black font-semibold shadow-sm"
+                      : "bg-zinc-900/70 text-zinc-400 hover:text-white border border-white/[0.04]"
+                  }`}
+                >
+                  Todas as Categorias
+                </button>
+
+                {(lexiconData.domains.find((d) => d.id === lexiconDomain)?.categories || []).map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setLexiconCategory(cat.id)}
+                    className={`px-3 py-1.5 rounded-xl text-[11px] font-medium whitespace-nowrap transition cursor-pointer flex items-center space-x-1.5 ${
+                      lexiconCategory === cat.id
+                        ? "bg-amber-400 text-black font-semibold shadow-sm"
+                        : "bg-zinc-900/70 text-zinc-400 hover:text-white border border-white/[0.04]"
+                    }`}
+                  >
+                    <span>{cat.title}</span>
+                    <span className={`text-[9px] px-1.5 py-0.2 rounded-full ${
+                      lexiconCategory === cat.id ? "bg-black/20 text-black" : "bg-white/10 text-zinc-400"
+                    }`}>
+                      {cat.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* VISUALIZAÇÃO: GÍRIAS OU VOCABULÁRIO TÉCNICO */}
+            {(lexiconDomain === "girias_sp" || lexiconDomain === "tecnico_profissional") && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(() => {
+                  const domainObj = lexiconData.domains.find((d) => d.id === lexiconDomain);
+                  if (!domainObj) return null;
+
+                  let items = domainObj.categories.flatMap((c) =>
+                    lexiconCategory === "todos" || c.id === lexiconCategory ? c.items : []
+                  );
+
+                  if (lexiconSearch.trim()) {
+                    const q = lexiconSearch.toLowerCase().trim();
+                    items = items.filter(
+                      (item) =>
+                        item.term.toLowerCase().includes(q) ||
+                        item.meaning.toLowerCase().includes(q) ||
+                        item.example.toLowerCase().includes(q)
+                    );
+                  }
+
+                  if (items.length === 0) {
+                    return (
+                      <div className="col-span-full text-center py-12 rounded-3xl border border-dashed border-white/10 p-6 space-y-2">
+                        <p className="text-xs text-zinc-400">Nenhum termo encontrado com o filtro atual.</p>
+                        <button
+                          type="button"
+                          onClick={() => { setLexiconSearch(""); setLexiconCategory("todos"); }}
+                          className="text-xs text-amber-400 hover:underline cursor-pointer"
+                        >
+                          Limpar filtros de busca
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return items.map((item) => {
+                    const isCopied = copiedTermId === item.id;
+                    return (
+                      <div
+                        key={item.id}
+                        className="apple-glass rounded-2xl p-4 space-y-2.5 border border-white/[0.06] hover:border-white/20 transition flex flex-col justify-between group"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-sm font-bold text-white tracking-tight group-hover:text-amber-300 transition">
+                              {item.term}
+                            </span>
+                            <span className="text-[9px] px-2 py-0.5 rounded-full bg-white/[0.05] border border-white/10 text-zinc-400 shrink-0">
+                              {item.category}
+                            </span>
+                          </div>
+
+                          {item.pronunciation && (
+                            <div className="inline-block text-[10px] text-amber-300/80 font-mono bg-amber-500/10 px-2 py-0.5 rounded-md">
+                              {item.pronunciation}
+                            </div>
+                          )}
+
+                          <p className="text-xs text-zinc-300 leading-snug">
+                            {item.meaning}
+                          </p>
+
+                          {item.example && (
+                            <div className="p-2 rounded-xl bg-black/40 border border-white/[0.04] text-[11px] text-zinc-400 italic leading-snug">
+                              "{item.example}"
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Botões de Ação do Termo */}
+                        <div className="pt-2 border-t border-white/5 flex items-center justify-between gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyTerm(item.id, item.example ? item.example.replace(/^Exemplo de uso: '/, "").replace(/' na fala cotidiana.*$/, "") : item.term)}
+                            className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white transition cursor-pointer"
+                            title="Copiar para a área de transferência"
+                          >
+                            {isCopied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                          </button>
+
+                          <div className="flex items-center space-x-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleInsertToDispatch(item.term, "append")}
+                              className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-white/[0.06] text-[10px] text-zinc-300 hover:text-white transition cursor-pointer"
+                              title="Adicionar termo ao final da mensagem"
+                            >
+                              + Anexar
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const phraseToSpeak = item.example && !item.example.startsWith("Exemplo de uso:")
+                                  ? item.example
+                                  : `Se liga na fita: ${item.term}, tá ligado?`;
+                                handleInsertToDispatch(phraseToSpeak, "replace");
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-[10px] font-semibold text-amber-300 hover:text-amber-200 transition cursor-pointer flex items-center space-x-1"
+                              title="Usar frase no disparo com a sua voz"
+                            >
+                              <Mic size={10} />
+                              <span>Falar este</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            )}
+
+            {/* VISUALIZAÇÃO: MODELOS DE TRANSFORMAÇÃO */}
+            {lexiconDomain === "transformacoes" && (
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-200">
+                  <p className="font-semibold text-emerald-300 mb-0.5">Modelos de Transformação de Registro</p>
+                  <p className="text-[11px] text-zinc-400">
+                    Veja como a mesma intenção comunicativa muda completamente dependendo do registro (Direto vs Profissional vs Analítico). Clique em qualquer variante para falar com a sua voz.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {lexiconData.transformations.map((trans, i) => (
+                    <div key={i} className="apple-glass rounded-3xl p-5 space-y-3.5 border border-white/10">
+                      <h3 className="text-xs font-bold text-white flex items-center gap-2">
+                        <Sparkles size={14} className="text-emerald-400" />
+                        <span>{trans.situation}</span>
+                      </h3>
+
+                      <div className="space-y-2">
+                        {Object.entries(trans.variants).map(([reg, phrase]) => (
+                          <div
+                            key={reg}
+                            className="p-3 rounded-2xl bg-zinc-900/70 border border-white/5 space-y-1.5 hover:border-white/20 transition group"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                                {reg}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleInsertToDispatch(phrase as string, "replace")}
+                                className="text-[10px] text-zinc-400 group-hover:text-emerald-300 flex items-center space-x-1 transition cursor-pointer"
+                              >
+                                <Mic size={10} />
+                                <span>Falar com Minha Voz</span>
+                              </button>
+                            </div>
+                            <p className="text-xs text-white italic">
+                              "{phrase}"
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* VISUALIZAÇÃO: DIÁLOGOS PAULISTANOS REAIS */}
+            {lexiconDomain === "dialogos" && (
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200">
+                  <p className="font-semibold text-purple-300 mb-0.5">Diálogos Reais Paulistanos da Prática</p>
+                  <p className="text-[11px] text-zinc-400">
+                    Roteiros completos de diálogos reais extraídos da vivência e da cultura de rua de São Paulo.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {(() => {
+                    const spDomain = lexiconData.domains.find((d) => d.id === "girias_sp");
+                    const part17 = spDomain?.categories.find((c) => c.title.includes("Diálogos Reais"));
+                    const dialogues = (part17 as any)?.dialogues || [];
+
+                    if (dialogues.length === 0) {
+                      return <p className="text-xs text-zinc-500">Diálogos em processamento...</p>;
+                    }
+
+                    return dialogues.map((d: any, idx: number) => (
+                      <div key={idx} className="apple-glass rounded-3xl p-5 space-y-3.5 border border-white/10 flex flex-col justify-between">
+                        <div className="space-y-2.5">
+                          <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <MessageCircle size={13} className="text-purple-400" />
+                              <span>{d.title}</span>
+                            </span>
+                            <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-medium">
+                              Diálogo Real
+                            </span>
+                          </div>
+
+                          <div className="space-y-2">
+                            {d.lines.map((line: string, lIdx: number) => (
+                              <div
+                                key={lIdx}
+                                className={`p-2.5 rounded-xl text-xs ${
+                                  lIdx % 2 === 0
+                                    ? "bg-zinc-900/90 text-white border border-white/5"
+                                    : "bg-purple-950/30 text-purple-200 border border-purple-500/20"
+                                }`}
+                              >
+                                {line}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="pt-3 border-t border-white/5 flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyTerm(`dlg_${idx}`, d.fullText)}
+                            className="p-1.5 rounded-lg bg-zinc-900 text-zinc-400 hover:text-white transition cursor-pointer"
+                            title="Copiar diálogo completo"
+                          >
+                            {copiedTermId === `dlg_${idx}` ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleInsertToDispatch(d.fullText, "replace")}
+                            className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer shadow-md"
+                          >
+                            <Mic size={11} />
+                            <span>Carregar no Disparo</span>
+                            <ArrowRight size={11} />
+                          </button>
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
               </div>
             )}
           </div>
