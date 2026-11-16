@@ -54,6 +54,7 @@ interface LibraryFolder {
 
 interface LibraryAudio {
   id: string;
+  type?: "youtube" | "generated";
   title: string;
   url: string;
   folderId: string;
@@ -66,6 +67,7 @@ interface LibraryAudio {
   sampleUrl?: string;
   sampleBase64?: string;
   transcript?: string;
+  sampleTranscript?: string;
   notes?: string;
   createdAt?: string;
 }
@@ -202,6 +204,7 @@ export default function VnTtsStudio() {
     streamUrl?: string | null;
     sampleUrl?: string | null;
     transcript?: string;
+    sampleTranscript?: string;
     transcriptLang?: string;
     subtitlesDisabled?: boolean;
   } | null>(null);
@@ -229,6 +232,8 @@ export default function VnTtsStudio() {
     streamUrl?: string;
     folderName?: string;
     transcript?: string;
+    sampleTranscript?: string;
+    type?: "youtube" | "generated";
   } | null>(null);
 
   // Modo de síntese com o modelo:
@@ -244,10 +249,12 @@ export default function VnTtsStudio() {
   const youtubeAudioRef = useRef<HTMLAudioElement | null>(null);
   const [mirrorText, setMirrorText] = useState("");
   const [isSynthesizingMirror, setIsSynthesizingMirror] = useState(false);
+  const [mirrorAudioBlob, setMirrorAudioBlob] = useState<Blob | null>(null);
   const [mirrorAudioUrl, setMirrorAudioUrl] = useState<string | null>(null);
   const [isPlayingMirrorAudio, setIsPlayingMirrorAudio] = useState(false);
   const mirrorAudioRef = useRef<HTMLAudioElement | null>(null);
   const [mirrorSuccessMsg, setMirrorSuccessMsg] = useState<string | null>(null);
+  const [isSavingGeneratedAudio, setIsSavingGeneratedAudio] = useState(false);
 
   // Records / Acervo
   const [records, setRecords] = useState<RecordNote[]>([]);
@@ -955,6 +962,74 @@ export default function VnTtsStudio() {
     }
   };
 
+  // Salvar a Minha Voz Gerada no Banco de Dados / Acervo
+  const handleSaveGeneratedAudio = async (source: "mirror" | "dispatch", targetFolderId?: string) => {
+    const audioBlob = source === "mirror" ? mirrorAudioBlob : dispatchAudioBlob;
+    const textSpoken = source === "mirror" ? mirrorText : dispatchAudioSourceText;
+    const modelName = selectedModelAudio?.title || (source === "mirror" ? (youtubeResult?.title || "Modelo YouTube") : "Voz do Usuário");
+
+    if (!audioBlob) {
+      alert("Nenhum áudio gerado para salvar.");
+      return;
+    }
+
+    setIsSavingGeneratedAudio(true);
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(audioBlob);
+      });
+      const audioBase64 = await base64Promise;
+
+      const title = textSpoken
+        ? `Voz Gerada: ${textSpoken.substring(0, 35)}${textSpoken.length > 35 ? "..." : ""}`
+        : `Voz Gerada (${modelName.substring(0, 25)})`;
+      const folderId = targetFolderId || selectedFolderForSave || "vozes-geradas";
+
+      const res = await fetch("/api/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save",
+          type: "generated",
+          title,
+          folderId,
+          duration: "Gerado",
+          transcript: textSpoken,
+          audioBase64,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Falha ao salvar voz no acervo.");
+
+      if (data.audios) setLibraryAudios(data.audios);
+      setMirrorSuccessMsg(`Áudio com sua voz gerada salvo com sucesso na pasta "${data.audio?.folderName || 'Minhas Vozes Geradas'}" do Acervo!`);
+      alert(`Áudio com sua voz gerada salvo com sucesso no Acervo! Acesse a aba "Acervo & Pastas" para ouvi-lo ou usá-lo.`);
+    } catch (err: any) {
+      console.error(err);
+      alert(`Erro ao salvar voz gerada: ${err.message || 'Falha ao salvar.'}`);
+    } finally {
+      setIsSavingGeneratedAudio(false);
+    }
+  };
+
+  // Baixar Áudio Gerado (.mp3)
+  const handleDownloadGeneratedAudio = (source: "mirror" | "dispatch") => {
+    const audioBlob = source === "mirror" ? mirrorAudioBlob : dispatchAudioBlob;
+    if (!audioBlob) return;
+    const url = URL.createObjectURL(audioBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `minha-voz-gerada-${Date.now()}.mp3`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   // Criar nova pasta
   const handleCreateFolder = async () => {
     if (!newFolderNameInput.trim()) return;
@@ -1005,6 +1080,8 @@ export default function VnTtsStudio() {
       streamUrl: audio.streamUrl,
       folderName: audio.folderName,
       transcript: audio.transcript,
+      sampleTranscript: audio.sampleTranscript || audio.transcript,
+      type: audio.type,
     });
     setVoiceModelMode("exact-video-voice"); // Timbre e sotaque idênticos configurados!
     if (audio.transcript) {
@@ -1144,7 +1221,9 @@ export default function VnTtsStudio() {
     setYoutubeError(null);
     try {
       const activeSampleB64 = selectedModelAudio?.sampleBase64 || youtubeResult?.sampleBase64 || youtubeResult?.audioBase64 || undefined;
-      const activeSampleText = selectedModelAudio?.transcript || youtubeResult?.transcript || mirrorText || "";
+      // Fala original falada no áudio de referência (ASR ou transcrição legítima do YouTube)
+      // NUNCA o roteiro que o usuário acabou de digitar para falar!
+      const activeSampleText = selectedModelAudio?.sampleTranscript || selectedModelAudio?.transcript || youtubeResult?.sampleTranscript || youtubeResult?.transcript || "";
       const mode = activeSampleB64 ? voiceModelMode : "default";
 
       const res = await fetch("/api/tts", {
@@ -1165,6 +1244,7 @@ export default function VnTtsStudio() {
       }
 
       const blob = await res.blob();
+      setMirrorAudioBlob(blob);
       const url = URL.createObjectURL(blob);
       setMirrorAudioUrl(url);
       setMirrorSuccessMsg(
@@ -1800,18 +1880,19 @@ export default function VnTtsStudio() {
                   </button>
 
                   <button
-                    onClick={handleSaveDispatchAudioToRecords}
-                    className="py-3 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-medium text-xs flex items-center justify-center space-x-1.5 transition border border-white/[0.08]"
+                    onClick={() => handleSaveGeneratedAudio("dispatch")}
+                    disabled={isSavingGeneratedAudio}
+                    className="py-3 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-medium text-xs flex items-center justify-center space-x-1.5 transition border border-emerald-500/30 cursor-pointer"
                   >
-                    {savedDispatchSuccess ? (
+                    {isSavingGeneratedAudio ? (
                       <>
-                        <Check size={14} className="text-emerald-400" />
-                        <span className="text-emerald-400">Salvo no Acervo!</span>
+                        <RefreshCw size={13} className="animate-spin text-emerald-400" />
+                        <span>Salvando Voz...</span>
                       </>
                     ) : (
                       <>
-                        <BookmarkPlus size={14} className="text-zinc-300" />
-                        <span>Salvar no Acervo</span>
+                        <BookmarkPlus size={14} className="text-emerald-400" />
+                        <span>Salvar Minha Voz no Acervo</span>
                       </>
                     )}
                   </button>
@@ -2345,22 +2426,53 @@ export default function VnTtsStudio() {
                         </button>
 
                         {mirrorAudioUrl && (
-                          <button
-                            onClick={handleToggleMirrorAudio}
-                            className="px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs flex items-center space-x-1.5 hover:bg-amber-500/30 transition cursor-pointer"
-                          >
-                            {isPlayingMirrorAudio ? (
-                              <>
-                                <Pause size={12} fill="currentColor" />
-                                <span>Pausar Áudio</span>
-                              </>
-                            ) : (
-                              <>
-                                <Play size={12} fill="currentColor" />
-                                <span>Ouvir Resultado</span>
-                              </>
-                            )}
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleToggleMirrorAudio}
+                              className="px-3.5 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs flex items-center space-x-1.5 hover:bg-amber-500/30 transition cursor-pointer"
+                            >
+                              {isPlayingMirrorAudio ? (
+                                <>
+                                  <Pause size={12} fill="currentColor" />
+                                  <span>Pausar Áudio</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Play size={12} fill="currentColor" />
+                                  <span>Ouvir Voz Gerada</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleSaveGeneratedAudio("mirror")}
+                              disabled={isSavingGeneratedAudio}
+                              className="px-3.5 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-xs flex items-center space-x-1.5 transition cursor-pointer font-medium"
+                            >
+                              {isSavingGeneratedAudio ? (
+                                <>
+                                  <RefreshCw size={12} className="animate-spin text-emerald-400" />
+                                  <span>Salvando Voz...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <BookmarkPlus size={12} className="text-emerald-400" />
+                                  <span>Salvar Minha Voz Gerada</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadGeneratedAudio("mirror")}
+                              className="px-3 py-2 rounded-xl bg-zinc-800 border border-white/10 text-zinc-300 hover:text-white text-xs flex items-center space-x-1.5 transition cursor-pointer"
+                            >
+                              <Download size={12} />
+                              <span>Baixar MP3</span>
+                            </button>
+                          </>
                         )}
                       </div>
 
@@ -2504,12 +2616,24 @@ export default function VnTtsStudio() {
                           }`}
                         >
                           <div className="flex items-center space-x-3 min-w-0 flex-1">
-                            <div className="w-9 h-9 rounded-xl bg-zinc-800 border border-white/10 flex items-center justify-center text-zinc-300 shrink-0">
-                              <FileAudio size={16} />
+                            <div
+                              className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border"
+                              style={{
+                                backgroundColor: item.type === "generated" ? "rgba(16, 185, 129, 0.15)" : "rgba(39, 39, 42, 1)",
+                                borderColor: item.type === "generated" ? "rgba(16, 185, 129, 0.4)" : "rgba(255, 255, 255, 0.1)",
+                                color: item.type === "generated" ? "#34d399" : "#d4d4d8"
+                              }}
+                            >
+                              {item.type === "generated" ? <Mic size={16} /> : <FileAudio size={16} />}
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="text-xs font-medium text-white truncate flex items-center gap-1.5">
                                 <span>{item.title}</span>
+                                {item.type === "generated" && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">
+                                    Voz Gerada
+                                  </span>
+                                )}
                                 {isActive && (
                                   <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-400 text-black font-semibold">
                                     ATIVO
@@ -2517,12 +2641,19 @@ export default function VnTtsStudio() {
                                 )}
                               </div>
                               <div className="flex items-center space-x-2 text-[10px] text-zinc-400 mt-0.5">
-                                <span className="text-amber-300/80">{item.folderName}</span>
+                                <span className={item.type === "generated" ? "text-emerald-400 font-medium" : "text-amber-300/80"}>
+                                  {item.folderName}
+                                </span>
                                 <span>•</span>
-                                <span>{item.duration || `${item.timeRange}`}</span>
+                                <span>{item.duration || `${item.timeRange || "Áudio"}`}</span>
                                 <span>•</span>
                                 <span>{item.sizeKb} KB</span>
                               </div>
+                              {item.transcript && (
+                                <div className="text-[10px] text-zinc-400/90 truncate max-w-md mt-0.5 italic">
+                                  "{item.transcript}"
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -2544,6 +2675,18 @@ export default function VnTtsStudio() {
                                 </>
                               )}
                             </button>
+
+                            {/* Download MP3 */}
+                            {item.streamUrl && (
+                              <a
+                                href={item.streamUrl}
+                                download={`${item.title || "audio"}.mp3`}
+                                className="p-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition cursor-pointer"
+                                title="Baixar MP3"
+                              >
+                                <Download size={13} />
+                              </a>
+                            )}
 
                             {/* Ativar como Modelo */}
                             <button

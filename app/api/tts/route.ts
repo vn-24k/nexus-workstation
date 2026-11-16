@@ -39,11 +39,21 @@ export async function POST(req: NextRequest) {
       const rawB64 = referenceAudioBase64.replace(/^data:audio\/\w+;base64,/, "");
       const sampleBytes = Buffer.from(rawB64, "base64");
 
+      // No modo de clonagem de alta fidelidade (exact-video-voice),
+      // temperatura em 0.70 e top_p em 0.85 ancoram o modelo com rigidez máxima
+      // ao timbre, aos formantes de voz e ao sotaque original da amostra!
+      const targetTemperature = modelMode === "exact-video-voice"
+        ? 0.70
+        : (Number(temperature) || 0.85);
+      const targetTopP = modelMode === "exact-video-voice"
+        ? 0.85
+        : (Number(top_p) || 0.88);
+
       const msgpackPayload: any = {
         text: cleanText,
         format: "mp3",
-        temperature: Number(temperature) || 0.85,
-        top_p: Number(top_p) || 0.88,
+        temperature: targetTemperature,
+        top_p: targetTopP,
         references: [
           {
             audio: sampleBytes,
