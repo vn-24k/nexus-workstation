@@ -58,7 +58,7 @@ const RULES_CATALOG: Record<string, Array<[RegExp, string]>> = {
   executivo: [
     // 5+ palavras
     [/\b(vou|vai|vamos)\s+na\s+(sua|tua)\s+casa\s+mais\s+tarde\b/gi, "me deslocarei até sua residência posteriormente"],
-    [/\b(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "o fluxo viário apresenta severa retenção"],
+    [/\b(o\s+)?(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "o fluxo viário apresenta severa retenção"],
     [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\s+sobre\s+o\s+trabalho\b/gi, "solicito alinhamento das diretrizes estratégicas sobre os entregáveis corporativos"],
     [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\b/gi, "solicito um breve alinhamento com vossa senhoria"],
 
@@ -89,7 +89,7 @@ const RULES_CATALOG: Record<string, Array<[RegExp, string]>> = {
   tecnico_juridico: [
     // 5+ palavras
     [/\b(vou|vai|vamos)\s+na\s+(sua|tua)\s+casa\s+mais\s+tarde\b/gi, "deslocar-me-ei ao vosso domicílio em momento ulterior"],
-    [/\b(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "a malha viária denota severo comprometimento de fluidez"],
+    [/\b(o\s+)?(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "a malha viária denota severo comprometimento de fluidez"],
     [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\s+sobre\s+o\s+trabalho\b/gi, "faz-se imperativo deliberarmos acerca das diretrizes operacionais em curso"],
     [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\b/gi, "faz-se mister instaurarmos interlocução com vossa senhoria"],
 
@@ -117,7 +117,7 @@ const RULES_CATALOG: Record<string, Array<[RegExp, string]>> = {
   persuasao: [
     // 5+ palavras
     [/\b(vou|vai|vamos)\s+na\s+(sua|tua)\s+casa\s+mais\s+tarde\b/gi, "vou pessoalmente até você ainda hoje para alinharmos essa grande oportunidade"],
-    [/\b(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "mesmo com o trânsito totalmente travado nada vai atrasar esse nosso avanço"],
+    [/\b(o\s+)?(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "mesmo com o trânsito totalmente travado nada vai atrasar esse nosso avanço"],
     [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\s+sobre\s+o\s+trabalho\b/gi, "precisamos fechar a estratégia de trabalho que vai transformar os nossos resultados"],
     [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\b/gi, "preciso te mostrar algo decisivo que não pode esperar"],
 
@@ -138,7 +138,7 @@ const RULES_CATALOG: Record<string, Array<[RegExp, string]>> = {
   afetivo: [
     // 5+ palavras
     [/\b(vou|vai|vamos)\s+na\s+(sua|tua)\s+casa\s+mais\s+tarde\b/gi, "logo mais vou passar aí na sua casa pra te dar um abraço bem apertado"],
-    [/\b(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "o trânsito tá bem chatinho e lento, mas já já chego aí pertinho de você"],
+    [/\b(o\s+)?(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "o trânsito tá bem chatinho e lento, mas já já chego aí pertinho de você"],
     [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\s+sobre\s+o\s+trabalho\b/gi, "quero muito te ver e conversar com calma e carinho sobre o trabalho"],
     [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\b/gi, "quero muito conversar com você com calma e carinho"],
 
@@ -227,8 +227,11 @@ function smartTransformWithPlaceholders(text: string, styleKey: string): string 
     restored = restored.replace(phKey, placeholders[phKey]);
   });
 
-  // Limpeza de duplicidades ortográficas ("o o", "a a", "de de")
-  restored = restored.replace(/\b(o\s+o|a\s+a|de\s+de|em\s+em|com\s+com)\b/gi, (match, p1) => p1.split(/\s+/)[0]);
+  // Limpeza de duplicidades ortográficas e colisões de artigos ("o o", "a a", "o a", "de de")
+  restored = restored.replace(/\b(o\s+[oa]|a\s+[oa]|de\s+de|em\s+em|com\s+com)\b/gi, (match) => {
+    const parts = match.split(/\s+/);
+    return parts[1] || parts[0];
+  });
   restored = restored.replace(/\s+/g, " ").trim();
 
   // Opener contextual
