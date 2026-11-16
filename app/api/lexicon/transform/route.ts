@@ -87,7 +87,14 @@ const RULES_CATALOG: Record<string, Array<[RegExp, string]>> = {
   ],
 
   tecnico_juridico: [
+    // 5+ palavras
+    [/\b(vou|vai|vamos)\s+na\s+(sua|tua)\s+casa\s+mais\s+tarde\b/gi, "deslocar-me-ei ao vosso domicílio em momento ulterior"],
+    [/\b(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "a malha viária denota severo comprometimento de fluidez"],
+    [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\s+sobre\s+o\s+trabalho\b/gi, "faz-se imperativo deliberarmos acerca das diretrizes operacionais em curso"],
+    [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\b/gi, "faz-se mister instaurarmos interlocução com vossa senhoria"],
+
     // 3-4 palavras
+    [/\b(ir|vou|vai|vamos)\s+na\s+(sua|tua)\s+casa\b/gi, "comparecer ao vosso domicílio"],
     [/\b(está\s+claro|é\s+óbvio|dá\s+pra\s+ver)\b/gi, "resta cristalino e inequívoco"],
     [/\b(não\s+tem\s+dúvida|com\s+certeza)\b/gi, "não subsiste margem para controvérsia hermenêutica"],
     [/\b(analisar\s+com\s+cuidado|pensar\s+bem)\b/gi, "ponderar os fatores intervenientes sob rigor analítico"],
@@ -97,6 +104,7 @@ const RULES_CATALOG: Record<string, Array<[RegExp, string]>> = {
     [/\b(temos\s+um\s+erro|está\s+errado)\b/gi, "constata-se vício substancial"],
 
     // Palavras individuais
+    [/\b(trabalho)\b/gi, "atividades operacionais"],
     [/\b(claro|óbvio|evidente)\b/gi, "inequívoco"],
     [/\b(prova|mostra)\b/gi, "corrobora"],
     [/\b(analisar|avaliar)\b/gi, "ponderar criticamente"],
@@ -107,6 +115,12 @@ const RULES_CATALOG: Record<string, Array<[RegExp, string]>> = {
   ],
 
   persuasao: [
+    // 5+ palavras
+    [/\b(vou|vai|vamos)\s+na\s+(sua|tua)\s+casa\s+mais\s+tarde\b/gi, "vou pessoalmente até você ainda hoje para alinharmos essa grande oportunidade"],
+    [/\b(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "mesmo com o trânsito totalmente travado nada vai atrasar esse nosso avanço"],
+    [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\s+sobre\s+o\s+trabalho\b/gi, "precisamos fechar a estratégia de trabalho que vai transformar os nossos resultados"],
+    [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\b/gi, "preciso te mostrar algo decisivo que não pode esperar"],
+
     // 3-4 palavras
     [/\b(é\s+muito\s+bom)\b/gi, "representa uma oportunidade contundente e sem precedentes"],
     [/\b(muito\s+bom)\b/gi, "uma oportunidade contundente e sem precedentes"],
@@ -115,17 +129,23 @@ const RULES_CATALOG: Record<string, Array<[RegExp, string]>> = {
     [/\b(mudar\s+a\s+sua\s+vida|mudar\s+sua\s+vida)\b/gi, "transformar radicalmente a sua eficiência e o seu patamar"],
 
     // Palavras individuais
+    [/\b(trabalho)\b/gi, "grande projeto"],
     [/\b(bom|legal|interessante)\b/gi, "altamente vantajoso"],
     [/\b(preço|custo)\b/gi, "investimento estratégico com retorno garantido"],
     [/\b(rápido|logo)\b/gi, "em tempo recorde"],
   ],
 
   afetivo: [
+    // 5+ palavras
+    [/\b(vou|vai|vamos)\s+na\s+(sua|tua)\s+casa\s+mais\s+tarde\b/gi, "logo mais vou passar aí na sua casa pra te dar um abraço bem apertado"],
+    [/\b(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "o trânsito tá bem chatinho e lento, mas já já chego aí pertinho de você"],
+    [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\s+sobre\s+o\s+trabalho\b/gi, "quero muito te ver e conversar com calma e carinho sobre o trabalho"],
+    [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\b/gi, "quero muito conversar com você com calma e carinho"],
+
     // Locuções compostas
     [/\boi\s+amor\b/gi, "Oi meu amor lindo"],
     [/\bestou\s+com\s+saudades\b/gi, "estou morrendo de saudades de você"],
     [/\b(vou\s+a[ií]\s+te\s+ver|vou\s+te\s+ver)\b/gi, "logo mais vou passar aí no nosso cantinho pra te encher de carinho"],
-    [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\b/gi, "quero muito conversar com você com calma e carinho"],
     [/\b(te\s+amo\s+muito|te\s+amo)\b/gi, "te amo mais que tudo nessa vida"],
     [/\b(um\s+abraço)\b/gi, "um abraço bem apertado e quentinho"],
     [/\b(fica\s+com\s+deus|se\s+cuida)\b/gi, "fica com Deus, se cuida muito"],
@@ -249,7 +269,23 @@ export async function POST(req: NextRequest) {
     }
 
     const cleanInput = text.trim();
-    const styleKey = RULES_CATALOG[style] ? style : "sp_quebrada";
+    const STYLE_ALIASES: Record<string, string> = {
+      girias_sp: "sp_quebrada",
+      sp: "sp_quebrada",
+      quebrada: "sp_quebrada",
+      sp_quebrada: "sp_quebrada",
+      culto: "tecnico_juridico",
+      tecnico: "tecnico_juridico",
+      juridico: "tecnico_juridico",
+      tecnico_juridico: "tecnico_juridico",
+      vendas: "persuasao",
+      persuasao: "persuasao",
+      afetivo: "afetivo",
+      carinho: "afetivo",
+      amor: "afetivo",
+      executivo: "executivo",
+    };
+    const styleKey = STYLE_ALIASES[style] || (RULES_CATALOG[style] ? style : "sp_quebrada");
 
     // 1. TENTATIVA COM HUGGING FACE ROUTER (se houver chave configurada)
     if (HF_TOKEN) {
