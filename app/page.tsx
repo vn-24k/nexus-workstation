@@ -281,12 +281,16 @@ export default function VnTtsStudio() {
   // Lexicon & Speech Styles (Dicionário de Gírias SP + Biblioteca Técnica/Profissional)
   const [selectedSpeechStyle, setSelectedSpeechStyle] = useState<"sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo">("sp_quebrada");
   const [isTransformingText, setIsTransformingText] = useState(false);
+  const [liveAutoTransform, setLiveAutoTransform] = useState<boolean>(true);
+  const [liveAdaptedPreview, setLiveAdaptedPreview] = useState<string>("");
+  const activeTransformAbortRef = useRef<AbortController | null>(null);
+  const transformDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const [lexiconDomain, setLexiconDomain] = useState<"girias_sp" | "tecnico_profissional" | "transformacoes" | "dialogos">("girias_sp");
   const [lexiconCategory, setLexiconCategory] = useState<string>("todos");
   const [lexiconSearch, setLexiconSearch] = useState("");
   const [copiedTermId, setCopiedTermId] = useState<string | null>(null);
 
-  // Mapeamento de estilo para mood do motor com AUTO-TRANSFORMAÇÃO IMEDIATA
+  // Mapeamento de estilo para mood do motor com AUTO-TRANSFORMAÇÃO IMEDIATA (inclusive re-clique)
   const handleSelectSpeechStyle = async (style: "sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo") => {
     setSelectedSpeechStyle(style);
     if (style === "sp_quebrada") setDispatchMood("sp");
@@ -294,7 +298,7 @@ export default function VnTtsStudio() {
     else if (style === "persuasao") setDispatchMood("empolgado");
     else if (style === "afetivo") setDispatchMood("calmo");
 
-    // Auto-transformação em tempo real do texto com as palavras do usuário
+    // Força auto-transformação imediata do texto atual com as palavras do usuário
     const baseText = originalUserText.trim() || dispatchText.trim();
     if (baseText) {
       if (!originalUserText.trim()) {
@@ -304,15 +308,21 @@ export default function VnTtsStudio() {
     }
   };
 
-  // Transformar texto para o estilo selecionado
+  // Transformar texto para o estilo selecionado (com cancelamento de requisições anteriores)
   const handleTransformDispatchText = async (targetStyle?: string, baseOverride?: string) => {
     const styleToUse = targetStyle || selectedSpeechStyle;
     const currentText = (baseOverride || originalUserText.trim() || dispatchText.trim());
-    if (!currentText || isTransformingText) return;
+    if (!currentText) return;
 
     if (!originalUserText.trim()) {
       setOriginalUserText(currentText);
     }
+
+    if (activeTransformAbortRef.current) {
+      activeTransformAbortRef.current.abort();
+    }
+    const abortCtrl = new AbortController();
+    activeTransformAbortRef.current = abortCtrl;
 
     setIsTransformingText(true);
     try {
@@ -320,22 +330,51 @@ export default function VnTtsStudio() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: currentText, style: styleToUse }),
+        signal: abortCtrl.signal,
       });
       const data = await res.json();
       if (data.ok && data.adapted) {
         handleDispatchTextChange(data.adapted);
+        setLiveAdaptedPreview(data.adapted);
       }
-    } catch (e) {
-      console.error("Erro ao transformar texto:", e);
+    } catch (e: any) {
+      if (e.name !== "AbortError") {
+        console.error("Erro ao transformar texto:", e);
+      }
     } finally {
       setIsTransformingText(false);
     }
   };
 
+  // Monitor em Tempo Real (Debounced): Transforma o texto automaticamente conforme o usuário digita
+  useEffect(() => {
+    if (!liveAutoTransform) return;
+    const textToAdapt = originalUserText.trim();
+    if (!textToAdapt || textToAdapt.length < 3) {
+      setLiveAdaptedPreview("");
+      return;
+    }
+
+    if (transformDebounceRef.current) {
+      clearTimeout(transformDebounceRef.current);
+    }
+
+    transformDebounceRef.current = setTimeout(() => {
+      handleTransformDispatchText(selectedSpeechStyle, textToAdapt);
+    }, 450);
+
+    return () => {
+      if (transformDebounceRef.current) {
+        clearTimeout(transformDebounceRef.current);
+      }
+    };
+  }, [originalUserText, selectedSpeechStyle, liveAutoTransform]);
+
   // Reverter texto adaptado para o que o usuário escreveu originalmente
   const handleRevertToOriginal = () => {
     if (originalUserText) {
       handleDispatchTextChange(originalUserText);
+      setLiveAdaptedPreview("");
     }
   };
 
@@ -2127,14 +2166,29 @@ export default function VnTtsStudio() {
                       {isTransformingText ? (
                         <>
                           <RefreshCw size={12} className="animate-spin text-amber-400" />
-                          <span>Adaptando ao estilo...</span>
+                          <span>Adaptando em tempo real...</span>
                         </>
                       ) : (
                         <>
                           <Sparkles size={12} className="text-amber-400" />
-                          <span>Transformar Novamente</span>
+                          <span>Transformar Agora</span>
                         </>
                       )}
+                    </button>
+
+                    {/* Toggle Modo Tempo Real */}
+                    <button
+                      type="button"
+                      onClick={() => setLiveAutoTransform(!liveAutoTransform)}
+                      className={`px-2.5 py-1.5 rounded-xl border text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer ${
+                        liveAutoTransform
+                          ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                          : "bg-zinc-800 border-white/10 text-zinc-400 hover:text-white"
+                      }`}
+                      title={liveAutoTransform ? "Transformação em tempo real ao digitar (Ativada)" : "Modo manual (Clique para ativar tempo real)"}
+                    >
+                      <Zap size={11} className={liveAutoTransform ? "text-emerald-400" : "text-zinc-500"} />
+                      <span>{liveAutoTransform ? "Tempo Real: ON" : "Tempo Real: OFF"}</span>
                     </button>
 
                     {/* Botão de Reverter para o Texto Original Digitado */}
@@ -2155,6 +2209,7 @@ export default function VnTtsStudio() {
                         type="button"
                         onClick={() => {
                           setOriginalUserText("");
+                          setLiveAdaptedPreview("");
                           handleDispatchTextChange("");
                         }}
                         className="text-[11px] text-zinc-500 hover:text-zinc-300 px-2 py-1 transition cursor-pointer"
@@ -2168,6 +2223,24 @@ export default function VnTtsStudio() {
                     {dispatchText.length} caracteres
                   </span>
                 </div>
+
+                {/* Feedback Card de Transformação em Tempo Real */}
+                {originalUserText && originalUserText.trim() !== dispatchText.trim() && (
+                  <div className="p-3 rounded-2xl bg-zinc-900/60 border border-white/[0.06] text-xs space-y-1.5 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono">
+                      <span>Texto Original com suas palavras:</span>
+                      <span className="text-amber-400 font-semibold">Adaptado para {
+                        selectedSpeechStyle === "sp_quebrada" ? "Gírias SP" :
+                        selectedSpeechStyle === "executivo" ? "Executivo" :
+                        selectedSpeechStyle === "tecnico_juridico" ? "Culto / Técnico" :
+                        selectedSpeechStyle === "persuasao" ? "Persuasão" : "Afetivo"
+                      }</span>
+                    </div>
+                    <div className="text-[11px] text-zinc-400 line-through truncate opacity-70">
+                      "{originalUserText}"
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Frases Prontas do Estilo Selecionado */}
