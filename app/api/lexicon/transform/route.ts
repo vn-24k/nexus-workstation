@@ -93,7 +93,8 @@ const RULES_CATALOG: Record<string, Array<[RegExp, string]>> = {
     [/\b(analisar\s+com\s+cuidado|pensar\s+bem)\b/gi, "ponderar os fatores intervenientes sob rigor analítico"],
     [/\b(mostrar\s+que\s+é\s+verdade|provar)\b/gi, "corroborar de maneira inconteste as premissas fáticas"],
     [/\b(tem\s+diferença|está\s+diferente)\b/gi, "apresenta substancial discrepância metodológica"],
-    [/\b(temos\s+um\s+erro|está\s+errado)\b/gi, "constata-se vício substancial no procedimento"],
+    [/\b(temos\s+um\s+erro\s+no\s+processo|erro\s+no\s+processo)\b/gi, "constata-se vício substancial no procedimento"],
+    [/\b(temos\s+um\s+erro|está\s+errado)\b/gi, "constata-se vício substancial"],
 
     // Palavras individuais
     [/\b(claro|óbvio|evidente)\b/gi, "inequívoco"],
@@ -107,7 +108,8 @@ const RULES_CATALOG: Record<string, Array<[RegExp, string]>> = {
 
   persuasao: [
     // 3-4 palavras
-    [/\b(é\s+muito\s+bom|muito\s+bom)\b/gi, "representa uma oportunidade contundente e sem precedentes"],
+    [/\b(é\s+muito\s+bom)\b/gi, "representa uma oportunidade contundente e sem precedentes"],
+    [/\b(muito\s+bom)\b/gi, "uma oportunidade contundente e sem precedentes"],
     [/\b(vai\s+dar\s+certo|funciona\s+mesmo)\b/gi, "comprova um retorno substancial e imediato"],
     [/\b(vamos\s+fazer|compre\s+agora|aproveite\s+agora)\b/gi, "o momento ideal de consolidação é exatamente agora"],
     [/\b(mudar\s+a\s+sua\s+vida|mudar\s+sua\s+vida)\b/gi, "transformar radicalmente a sua eficiência e o seu patamar"],
