@@ -904,13 +904,10 @@ export default function VnTtsStudio() {
       setYoutubeResult(data);
       if (data.transcript && data.transcript.trim()) {
         setMirrorText(data.transcript.trim());
-        setMirrorSuccessMsg(`Áudio de ${data.duration || 'longa duração'} extraído com sucesso! Fala detectada: pronto para espelhar.`);
-      } else if (data.subtitlesDisabled) {
-        setMirrorText("");
-        setMirrorSuccessMsg(`Áudio de ${data.duration || 'longa duração'} extraído com sucesso! Como as legendas deste vídeo estão desativadas no YouTube, digite o que a pessoa falou para falar com sua voz.`);
+        setMirrorSuccessMsg(`Áudio de ${data.duration || 'longa duração'} extraído com sucesso! Fala detectada e carregada na caixa de texto.`);
       } else {
-        setMirrorText(data.title ? `Fala espelhada: ${data.title}` : "");
-        setMirrorSuccessMsg(`Áudio de ${data.duration || 'longa duração'} extraído com sucesso! Pronto para salvar ou usar como modelo.`);
+        setMirrorText("");
+        setMirrorSuccessMsg(`Áudio de ${data.duration || 'longa duração'} extraído com sucesso! O vídeo não possui legendas ativas ou o áudio possui ruído de fundo. Digite na caixa abaixo o texto exato que você quer falar.`);
       }
 
       // Se ainda não temos um modelo selecionado, define este como modelo ativo e ativa modo de alta fidelidade
@@ -1219,9 +1216,9 @@ export default function VnTtsStudio() {
   };
 
   const handleSynthesizeMirror = async (overrideText?: string) => {
-    const textToSpeak = (overrideText || mirrorText).trim() || youtubeResult?.title || "";
+    const textToSpeak = (overrideText || mirrorText).trim();
     if (!textToSpeak) {
-      setYoutubeError("Digite um texto ou roteiro para sintetizar.");
+      setYoutubeError("Digite o texto ou roteiro que você deseja que a voz fale no campo abaixo.");
       return;
     }
 
