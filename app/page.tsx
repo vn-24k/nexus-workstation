@@ -163,7 +163,10 @@ export default function VnTtsStudio() {
     thumbnail: string;
     sizeKb: number;
     audioBase64: string;
+    transcript?: string;
+    transcriptLang?: string;
   } | null>(null);
+  const [isFetchingTranscript, setIsFetchingTranscript] = useState(false);
   const [youtubeError, setYoutubeError] = useState<string | null>(null);
   const [isPlayingYoutubeAudio, setIsPlayingYoutubeAudio] = useState(false);
   const youtubeAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -743,12 +746,89 @@ export default function VnTtsStudio() {
       }
 
       setYoutubeResult(data);
-      setMirrorText(data.title ? `Fala espelhada: ${data.title}` : "");
+      if (data.transcript && data.transcript.trim()) {
+        setMirrorText(data.transcript.trim());
+        setMirrorSuccessMsg(`Fala original do vídeo detectada (${data.transcriptLang || 'PT'})! Clique em 'Falar a Mesma Coisa' para gerar.`);
+      } else {
+        setMirrorText(data.title ? `Fala espelhada: ${data.title}` : "");
+      }
     } catch (err: any) {
       setYoutubeError(err.message || "Erro ao conectar com o extrator de áudio.");
     } finally {
       setIsExtractingYoutube(false);
     }
+  };
+
+  // Obter ou Recarregar Fala Transcrita do Vídeo
+  const handleFetchTranscript = async () => {
+    if (!youtubeUrl || !youtubeUrl.trim()) return;
+    setIsFetchingTranscript(true);
+    setYoutubeError(null);
+    try {
+      const res = await fetch("/api/youtube/transcript", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: youtubeUrl.trim(),
+          start: youtubeStart.trim() || "0",
+          end: youtubeEnd.trim() || "30",
+        }),
+      });
+      const data = await res.json();
+      if (data.ok && data.text) {
+        setMirrorText(data.text.trim());
+        if (youtubeResult) {
+          setYoutubeResult({ ...youtubeResult, transcript: data.text.trim(), transcriptLang: data.language });
+        }
+        setMirrorSuccessMsg(`Fala capturada com sucesso (${data.language || 'PT'})! Pronto para gerar.`);
+      } else {
+        setYoutubeError(data.error || "Não foi possível extrair a fala automática deste trecho.");
+      }
+    } catch (err: any) {
+      setYoutubeError(err.message || "Erro ao consultar transcrição do YouTube.");
+    } finally {
+      setIsFetchingTranscript(false);
+    }
+  };
+
+  // Ação Imediata: Falar a Mesma Coisa do Vídeo com a Minha Voz
+  const handleSpeakSameThing = async () => {
+    let textToSpeak = mirrorText.trim();
+    if (!textToSpeak && youtubeResult?.transcript) {
+      textToSpeak = youtubeResult.transcript.trim();
+      setMirrorText(textToSpeak);
+    }
+
+    if (!textToSpeak && youtubeUrl) {
+      setIsSynthesizingMirror(true);
+      try {
+        const res = await fetch("/api/youtube/transcript", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: youtubeUrl.trim(),
+            start: youtubeStart.trim() || "0",
+            end: youtubeEnd.trim() || "30",
+          }),
+        });
+        const data = await res.json();
+        if (data.ok && data.text) {
+          textToSpeak = data.text.trim();
+          setMirrorText(textToSpeak);
+          if (youtubeResult) {
+            setYoutubeResult({ ...youtubeResult, transcript: data.text.trim(), transcriptLang: data.language });
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (!textToSpeak) {
+      setYoutubeError("Nenhuma fala detectada automaticamente. Digite o que o vídeo falou no campo de roteiro.");
+      setIsSynthesizingMirror(false);
+      return;
+    }
+
+    handleSynthesizeMirror();
   };
 
   const handleToggleYoutubeAudio = () => {
@@ -1711,23 +1791,82 @@ export default function VnTtsStudio() {
 
                   {/* Mirroring & Synthesis Box */}
                   <div className="p-4 rounded-2xl bg-zinc-900/60 border border-white/[0.08] space-y-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <span className="text-[11px] font-semibold text-zinc-300 flex items-center space-x-1.5">
                         <Sparkles size={12} className="text-amber-400" />
-                        <span>Sintetizar Roteiro com Minha Voz (Espelhando Cadência)</span>
+                        <span>Roteiro de Fala & Espelhamento Vocal</span>
                       </span>
+
+                      {/* Botão para recarregar ou extrair a fala original do vídeo */}
+                      <button
+                        onClick={handleFetchTranscript}
+                        disabled={isFetchingTranscript}
+                        className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-300 hover:text-white flex items-center space-x-1 transition cursor-pointer disabled:opacity-40"
+                      >
+                        {isFetchingTranscript ? (
+                          <>
+                            <RefreshCw size={10} className="animate-spin text-zinc-400" />
+                            <span>Extraindo fala...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={10} className="text-red-400" />
+                            <span>Capturar Fala do Trecho</span>
+                          </>
+                        )}
+                      </button>
                     </div>
+
+                    {/* Exibição da fala detectada no vídeo */}
+                    {youtubeResult.transcript && (
+                      <div className="p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-[11px] space-y-1">
+                        <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                          <span className="flex items-center space-x-1 text-red-400 font-medium">
+                            <Radio size={10} />
+                            <span>Fala Detectada no Vídeo ({youtubeResult.transcriptLang?.toUpperCase() || 'PT'}):</span>
+                          </span>
+                          <button
+                            onClick={() => setMirrorText(youtubeResult.transcript || '')}
+                            className="text-[10px] text-zinc-400 hover:text-white underline cursor-pointer"
+                          >
+                            Recarregar fala original
+                          </button>
+                        </div>
+                        <p className="text-zinc-200 italic line-clamp-2">
+                          "{youtubeResult.transcript}"
+                        </p>
+                      </div>
+                    )}
 
                     <textarea
                       value={mirrorText}
                       onChange={(e) => setMirrorText(e.target.value)}
-                      placeholder="Digite o texto que deseja falar com sua voz espelhando esse estilo..."
+                      placeholder="Digite o texto ou edite a fala do vídeo para sua voz reproduzir..."
                       rows={2}
                       className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white/30 resize-none transition"
                     />
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                       <div className="flex items-center space-x-2">
+                        {/* AÇÃO PRINCIPAL EM DESTAQUE: FALAR A MESMA COISA DO VÍDEO */}
+                        <button
+                          onClick={handleSpeakSameThing}
+                          disabled={isSynthesizingMirror}
+                          className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-semibold text-xs flex items-center space-x-2 shadow-xl shadow-red-950/50 hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer disabled:opacity-40"
+                        >
+                          {isSynthesizingMirror ? (
+                            <>
+                              <RefreshCw size={13} className="animate-spin" />
+                              <span>Sintetizando com Sua Voz...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Mic size={13} />
+                              <span>Falar a Mesma Coisa do Vídeo</span>
+                            </>
+                          )}
+                        </button>
+
                         {mirrorAudioUrl && (
                           <button
                             onClick={handleToggleMirrorAudio}
@@ -1763,24 +1902,6 @@ export default function VnTtsStudio() {
                         >
                           <ArrowRight size={12} />
                           <span>Enviar p/ Disparo</span>
-                        </button>
-
-                        <button
-                          onClick={handleSynthesizeMirror}
-                          disabled={isSynthesizingMirror}
-                          className="px-4 py-1.5 rounded-xl bg-white hover:bg-zinc-200 text-black font-semibold text-xs flex items-center space-x-1.5 shadow-md transition cursor-pointer disabled:opacity-40"
-                        >
-                          {isSynthesizingMirror ? (
-                            <>
-                              <RefreshCw size={12} className="animate-spin" />
-                              <span>Sintetizando...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Volume2 size={12} />
-                              <span>Gerar com Minha Voz</span>
-                            </>
-                          )}
                         </button>
                       </div>
                     </div>
