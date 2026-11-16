@@ -30,6 +30,8 @@ const MULTI_WORD_RULES: Record<string, Array<[RegExp, string]>> = {
     [/\b(saiu\s+correndo|foi\s+embora)\b/gi, "meteu marcha e deu pinote"],
   ],
   executivo: [
+    [/\b(ir|vou|vai|vamos)\s+na\s+(sua|tua)\s+casa\b/gi, "me deslocarei até a sua residência"],
+    [/\b(transito|trânsito)\s+t[aá]\s+(muito\s+)?(ruim|pesado|complicado|parado|lento)\b/gi, "o fluxo viário apresenta severa retenção"],
     [/\b(preciso|quero)\s+(falar|conversar)\s+com\s+voc[eê]\b/gi, "solicito alinhamento das diretrizes estratégicas com vossa senhoria"],
     [/\b(fazer\s+uma\s+reunião|vamos\s+conversar)\b/gi, "agendar uma call de alinhamento com os stakeholders"],
     [/\b(resolver\s+o\s+problema|dar\s+um\s+jeito)\b/gi, "mitigar a ocorrência e implementar o plano de contingência"],
@@ -128,7 +130,8 @@ const SINGLE_WORD_RULES: Record<string, Array<[RegExp, string]>> = {
     [/\b(oi|olá)\b/gi, "Oi meu bem, tudo bem com você?"],
     [/\b(obrigado|valeu)\b/gi, "Muito obrigado de coração, viu?"],
     [/\b(tchau|até mais)\b/gi, "Um beijo bem apertado no seu coração, se cuida!"],
-    [/\b(preciso|faz pra mim)\b/gi, "Se você conseguir fazer com calma pra mim, vou te agradecer demais"],
+    [/\b(preciso\s+falar|quero\s+falar)\b/gi, "quero muito conversar com você"],
+    [/\b(preciso|faz pra mim)\b/gi, "se você puder ver isso com carinho pra mim"],
     [/\b(abraço)\b/gi, "um abraço bem apertado e quentinho"],
     [/\b(saudade|saudades)\b/gi, "morrendo de saudades de você"],
     [/\b(te amo)\b/gi, "te amo mais que tudo nessa vida"],
