@@ -34,7 +34,41 @@ import {
   Scissors,
   Headphones,
   ExternalLink,
+  Folder,
+  FolderPlus,
+  Layers,
+  Sliders,
+  Music,
+  Zap,
+  Shield,
+  FileAudio,
+  CheckCheck,
 } from "lucide-react";
+
+interface LibraryFolder {
+  id: string;
+  name: string;
+  icon?: string;
+  createdAt?: string;
+}
+
+interface LibraryAudio {
+  id: string;
+  title: string;
+  url: string;
+  folderId: string;
+  folderName: string;
+  duration: string;
+  durationSec?: number;
+  timeRange?: string;
+  sizeKb: number;
+  streamUrl?: string;
+  sampleUrl?: string;
+  sampleBase64?: string;
+  transcript?: string;
+  notes?: string;
+  createdAt?: string;
+}
 
 interface VoiceAnchor {
   id: string;
@@ -158,15 +192,52 @@ export default function VnTtsStudio() {
   const [youtubeEnd, setYoutubeEnd] = useState("00:30");
   const [isExtractingYoutube, setIsExtractingYoutube] = useState(false);
   const [youtubeResult, setYoutubeResult] = useState<{
+    id?: string;
     title: string;
     duration: string;
     thumbnail: string;
     sizeKb: number;
-    audioBase64: string;
+    audioBase64?: string | null;
+    sampleBase64?: string | null;
+    streamUrl?: string | null;
+    sampleUrl?: string | null;
     transcript?: string;
     transcriptLang?: string;
     subtitlesDisabled?: boolean;
   } | null>(null);
+
+  // Library & Folders State (Banco de Dados de Áudios e Modelos)
+  const [libraryFolders, setLibraryFolders] = useState<LibraryFolder[]>([
+    { id: "geral", name: "Geral", icon: "folder" },
+    { id: "girias-sp", name: "Gírias SP & Quebrada", icon: "zap" },
+    { id: "policia-investigacao", name: "Polícia & Interceptações", icon: "shield" },
+    { id: "entrevistas-podcasts", name: "Podcasts & Entrevistas", icon: "mic" }
+  ]);
+  const [libraryAudios, setLibraryAudios] = useState<LibraryAudio[]>([]);
+  const [activeFolderFilter, setActiveFolderFilter] = useState<string>("todos");
+  const [isLibraryLoading, setIsLibraryLoading] = useState(false);
+  const [isSavingToLibrary, setIsSavingToLibrary] = useState(false);
+  const [showNewFolderModal, setShowNewFolderModal] = useState(false);
+  const [newFolderNameInput, setNewFolderNameInput] = useState("");
+  const [selectedFolderForSave, setSelectedFolderForSave] = useState("geral");
+
+  // Selected Reference Model State (O modelo vocal ativo para a síntese)
+  const [selectedModelAudio, setSelectedModelAudio] = useState<{
+    id: string;
+    title: string;
+    sampleBase64?: string;
+    streamUrl?: string;
+    folderName?: string;
+    transcript?: string;
+  } | null>(null);
+
+  // Modo de síntese com o modelo:
+  // "my-voice-cadence": Minha voz adotando a cadência, tom e sotaque do vídeo
+  // "exact-video-voice": Voz e timbre 100% idênticos ao locutor do vídeo
+  // "default": Minha voz padrão
+  const [voiceModelMode, setVoiceModelMode] = useState<"my-voice-cadence" | "exact-video-voice" | "default">("my-voice-cadence");
+  const [playingLibraryAudioId, setPlayingLibraryAudioId] = useState<string | null>(null);
+  const libraryAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const [isFetchingTranscript, setIsFetchingTranscript] = useState(false);
   const [youtubeError, setYoutubeError] = useState<string | null>(null);
   const [isPlayingYoutubeAudio, setIsPlayingYoutubeAudio] = useState(false);
@@ -422,6 +493,9 @@ export default function VnTtsStudio() {
     setDispatchAudioSourceText("");
 
     try {
+      const activeSampleB64 = selectedModelAudio?.sampleBase64 || undefined;
+      const mode = activeSampleB64 ? voiceModelMode : "default";
+
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -429,6 +503,8 @@ export default function VnTtsStudio() {
         body: JSON.stringify({
           text: textToSynthesize,
           mood: dispatchMood,
+          modelMode: mode,
+          referenceAudioBase64: activeSampleB64,
           timestamp: Date.now(),
         }),
       });
@@ -718,6 +794,27 @@ export default function VnTtsStudio() {
     setVoiceAnchors((prev) => prev.filter((a) => a.id !== id));
   };
 
+  // Carregar Biblioteca e Pastas
+  const fetchLibrary = async () => {
+    try {
+      setIsLibraryLoading(true);
+      const res = await fetch("/api/library");
+      const data = await res.json();
+      if (data.ok) {
+        if (data.folders && data.folders.length > 0) setLibraryFolders(data.folders);
+        if (data.audios) setLibraryAudios(data.audios);
+      }
+    } catch (e) {
+      console.error("Erro ao carregar acervo:", e);
+    } finally {
+      setIsLibraryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLibrary();
+  }, []);
+
   // YouTube Audio Extraction & Cadence Mirroring Handlers
   const handleExtractYoutube = async () => {
     if (!youtubeUrl || !youtubeUrl.trim()) {
@@ -737,7 +834,7 @@ export default function VnTtsStudio() {
         body: JSON.stringify({
           url: youtubeUrl.trim(),
           start: youtubeStart.trim() || "0",
-          end: youtubeEnd.trim() || "30",
+          end: youtubeEnd.trim() || undefined,
         }),
       });
 
@@ -749,17 +846,141 @@ export default function VnTtsStudio() {
       setYoutubeResult(data);
       if (data.transcript && data.transcript.trim()) {
         setMirrorText(data.transcript.trim());
-        setMirrorSuccessMsg(`Fala original do vídeo detectada (${data.transcriptLang || 'PT'})! Clique em 'Falar a Mesma Coisa' para gerar.`);
+        setMirrorSuccessMsg(`Áudio de ${data.duration || 'longa duração'} extraído com sucesso! Fala detectada: pronto para espelhar.`);
       } else if (data.subtitlesDisabled) {
         setMirrorText("");
-        setMirrorSuccessMsg(`Áudio de ${data.duration || '60s'} extraído com sucesso! Como as legendas deste vídeo estão desativadas no YouTube, digite o que a pessoa falou para falar com sua voz.`);
+        setMirrorSuccessMsg(`Áudio de ${data.duration || 'longa duração'} extraído com sucesso! Como as legendas deste vídeo estão desativadas no YouTube, digite o que a pessoa falou para falar com sua voz.`);
       } else {
         setMirrorText(data.title ? `Fala espelhada: ${data.title}` : "");
+        setMirrorSuccessMsg(`Áudio de ${data.duration || 'longa duração'} extraído com sucesso! Pronto para salvar ou usar como modelo.`);
+      }
+
+      // Se ainda não temos um modelo selecionado, define este como modelo ativo
+      if (data.sampleBase64 || data.audioBase64) {
+        setSelectedModelAudio({
+          id: data.id || `yt_${Date.now()}`,
+          title: data.title || "Áudio do YouTube",
+          sampleBase64: data.sampleBase64 || data.audioBase64 || undefined,
+          streamUrl: data.streamUrl || undefined,
+          transcript: data.transcript || undefined,
+        });
       }
     } catch (err: any) {
       setYoutubeError(err.message || "Erro ao conectar com o extrator de áudio.");
     } finally {
       setIsExtractingYoutube(false);
+    }
+  };
+
+  // Salvar no Banco de Dados em uma Pasta Específica
+  const handleSaveToLibrary = async (targetFolderId?: string) => {
+    if (!youtubeResult) return;
+    const folderId = targetFolderId || selectedFolderForSave || "geral";
+    const folder = libraryFolders.find((f) => f.id === folderId) || libraryFolders[0];
+
+    setIsSavingToLibrary(true);
+    setYoutubeError(null);
+    try {
+      const res = await fetch("/api/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save",
+          id: youtubeResult.id,
+          title: youtubeResult.title,
+          url: youtubeUrl,
+          folderId: folder.id,
+          duration: youtubeResult.duration,
+          timeRange: `${youtubeStart} - ${youtubeEnd || "Fim"}`,
+          transcript: mirrorText || youtubeResult.transcript || "",
+          audioBase64: youtubeResult.audioBase64 || undefined,
+          sampleBase64: youtubeResult.sampleBase64 || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Erro ao salvar na biblioteca.");
+
+      if (data.audios) setLibraryAudios(data.audios);
+      setMirrorSuccessMsg(`Áudio salvo com sucesso na pasta "${folder.name}"!`);
+    } catch (err: any) {
+      setYoutubeError(err.message || "Erro ao salvar áudio no banco de dados.");
+    } finally {
+      setIsSavingToLibrary(false);
+    }
+  };
+
+  // Criar nova pasta
+  const handleCreateFolder = async () => {
+    if (!newFolderNameInput.trim()) return;
+    try {
+      const res = await fetch("/api/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "folder",
+          name: newFolderNameInput.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (data.ok && data.folders) {
+        setLibraryFolders(data.folders);
+        setSelectedFolderForSave(data.folders[data.folders.length - 1].id);
+        setNewFolderNameInput("");
+        setShowNewFolderModal(false);
+        setMirrorSuccessMsg("Nova pasta criada com sucesso!");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Deletar áudio da biblioteca
+  const handleDeleteLibraryAudio = async (audioId: string) => {
+    try {
+      const res = await fetch(`/api/library?audioId=${encodeURIComponent(audioId)}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.ok && data.audios) {
+        setLibraryAudios(data.audios);
+        if (selectedModelAudio?.id === audioId) {
+          setSelectedModelAudio(null);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Ativar modelo vocal a partir de um áudio da biblioteca
+  const handleSelectModelFromLibrary = (audio: LibraryAudio) => {
+    setSelectedModelAudio({
+      id: audio.id,
+      title: audio.title,
+      sampleBase64: audio.sampleBase64,
+      streamUrl: audio.streamUrl,
+      folderName: audio.folderName,
+      transcript: audio.transcript,
+    });
+    if (audio.transcript) {
+      setMirrorText(audio.transcript);
+    }
+    setMirrorSuccessMsg(`🎯 Modelo "${audio.title}" ativado! Agora sua voz sintetizará com o tom e sotaque deste áudio.`);
+  };
+
+  // Reproduzir áudio da biblioteca
+  const handleToggleLibraryAudioPlay = (audio: LibraryAudio) => {
+    if (playingLibraryAudioId === audio.id) {
+      libraryAudioPlayerRef.current?.pause();
+      setPlayingLibraryAudioId(null);
+    } else {
+      if (libraryAudioPlayerRef.current) libraryAudioPlayerRef.current.pause();
+      const playSrc = audio.sampleBase64 || audio.streamUrl || "";
+      if (!playSrc) return;
+      libraryAudioPlayerRef.current = new Audio(playSrc);
+      libraryAudioPlayerRef.current.onended = () => setPlayingLibraryAudioId(null);
+      libraryAudioPlayerRef.current.onerror = () => setPlayingLibraryAudioId(null);
+      libraryAudioPlayerRef.current.play();
+      setPlayingLibraryAudioId(audio.id);
     }
   };
 
@@ -849,7 +1070,8 @@ export default function VnTtsStudio() {
   };
 
   const handleToggleYoutubeAudio = () => {
-    if (!youtubeResult?.audioBase64) return;
+    const playSrc = youtubeResult?.audioBase64 || youtubeResult?.streamUrl;
+    if (!playSrc) return;
     if (isPlayingYoutubeAudio) {
       youtubeAudioRef.current?.pause();
       setIsPlayingYoutubeAudio(false);
@@ -857,7 +1079,7 @@ export default function VnTtsStudio() {
       if (youtubeAudioRef.current) {
         youtubeAudioRef.current.pause();
       }
-      youtubeAudioRef.current = new Audio(youtubeResult.audioBase64);
+      youtubeAudioRef.current = new Audio(playSrc);
       youtubeAudioRef.current.onended = () => setIsPlayingYoutubeAudio(false);
       youtubeAudioRef.current.onerror = () => setIsPlayingYoutubeAudio(false);
       youtubeAudioRef.current.play();
@@ -865,28 +1087,45 @@ export default function VnTtsStudio() {
     }
   };
 
-  const handleSynthesizeMirror = async () => {
-    const textToSpeak = mirrorText.trim() || youtubeResult?.title || "";
+  const handleSynthesizeMirror = async (overrideText?: string) => {
+    const textToSpeak = (overrideText || mirrorText).trim() || youtubeResult?.title || "";
     if (!textToSpeak) {
-      setYoutubeError("Digite um texto ou roteiro para espelhar com sua voz.");
+      setYoutubeError("Digite um texto ou roteiro para sintetizar.");
       return;
     }
 
     setIsSynthesizingMirror(true);
     setYoutubeError(null);
     try {
+      const activeSampleB64 = selectedModelAudio?.sampleBase64 || youtubeResult?.sampleBase64 || youtubeResult?.audioBase64 || undefined;
+      const mode = activeSampleB64 ? voiceModelMode : "default";
+
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: textToSpeak, timestamp: Date.now() }),
+        body: JSON.stringify({
+          text: textToSpeak,
+          modelMode: mode,
+          referenceAudioBase64: activeSampleB64,
+          timestamp: Date.now(),
+        }),
       });
 
-      if (!res.ok) throw new Error("Erro na síntese vocal.");
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || "Erro na síntese vocal.");
+      }
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       setMirrorAudioUrl(url);
-      setMirrorSuccessMsg("Áudio sintetizado com sua voz espelhando este modelo!");
+      setMirrorSuccessMsg(
+        mode === "my-voice-cadence"
+          ? "Áudio sintetizado com sua voz adotando a cadência, tom e sotaque do modelo!"
+          : mode === "exact-video-voice"
+          ? "Áudio sintetizado com a voz e timbre idênticos ao locutor do vídeo!"
+          : "Áudio sintetizado com sua voz padrão!"
+      );
 
       if (mirrorAudioRef.current) mirrorAudioRef.current.pause();
       const audio = new Audio(url);
@@ -932,7 +1171,7 @@ export default function VnTtsStudio() {
       name: `[YouTube] ${youtubeResult.title.substring(0, 32)}...`,
       mood: "empolgado",
       accent: "sp",
-      audioUrl: youtubeResult.audioBase64,
+      audioUrl: youtubeResult.audioBase64 || youtubeResult.streamUrl || "",
       duration: youtubeResult.duration || "0:30",
       createdAt: new Date().toISOString(),
       energy: "Alta (YouTube)",
@@ -1283,6 +1522,38 @@ export default function VnTtsStudio() {
                 <span className="text-emerald-400 font-mono">PTT Nativo Ativo</span>
               </div>
             </div>
+
+            {/* Banner de Modelo Ativo de Cadência / Sotaque */}
+            {selectedModelAudio && (
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 flex items-center justify-between gap-3 animate-in fade-in">
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-amber-400/20 text-amber-400 flex items-center justify-center shrink-0">
+                    <Sparkles size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-white truncate flex items-center gap-1.5">
+                      <span>Estilo Vinculado: {selectedModelAudio.title}</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-400/20 text-amber-300">
+                        {voiceModelMode === "exact-video-voice" ? "Voz do Vídeo" : "Minha Voz + Sotaque"}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-zinc-400 truncate">
+                      {voiceModelMode === "exact-video-voice"
+                        ? "Sintetizará com o timbre e tom idênticos ao vídeo do YouTube."
+                        : "Sua voz adotará o ritmo, pausas, tom e sotaque deste modelo."}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedModelAudio(null)}
+                  className="text-[10px] text-zinc-400 hover:text-white px-2 py-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 transition shrink-0 cursor-pointer"
+                >
+                  Desvincular
+                </button>
+              </div>
+            )}
 
             {/* Recipient Selection */}
             <div className="apple-glass rounded-3xl p-5 space-y-3">
@@ -1711,10 +1982,10 @@ export default function VnTtsStudio() {
                       type="text"
                       value={youtubeEnd}
                       onChange={(e) => setYoutubeEnd(e.target.value)}
-                      placeholder="00:30"
-                      className="w-16 bg-zinc-900 border border-white/10 rounded-lg px-2 py-1 text-center font-mono text-xs text-white focus:outline-none focus:border-red-500/50"
+                      placeholder="01:00:00"
+                      className="w-20 bg-zinc-900 border border-white/10 rounded-lg px-2 py-1 text-center font-mono text-xs text-white focus:outline-none focus:border-red-500/50"
                     />
-                    <span className="text-[10px] text-zinc-500 hidden sm:inline">(Janela de até 60s)</span>
+                    <span className="text-[10px] text-zinc-400 hidden sm:inline">(Duração livre: de 30s a 1h, 2h ou vazio para vídeo completo)</span>
                   </div>
 
                   <button
@@ -1730,7 +2001,7 @@ export default function VnTtsStudio() {
                     ) : (
                       <>
                         <Youtube size={13} />
-                        <span>Extrair Áudio & Estilo</span>
+                        <span>Extrair Áudio & Modelo</span>
                       </>
                     )}
                   </button>
@@ -1788,19 +2059,79 @@ export default function VnTtsStudio() {
                     </div>
 
                     {/* Original Audio Play Button */}
+                    <div className="flex items-center space-x-2 self-start sm:self-auto">
+                      <button
+                        onClick={handleToggleYoutubeAudio}
+                        className="px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 hover:text-white flex items-center space-x-1.5 transition cursor-pointer"
+                      >
+                        {isPlayingYoutubeAudio ? (
+                          <>
+                            <Pause size={12} fill="currentColor" />
+                            <span>Pausar Áudio</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play size={12} fill="currentColor" />
+                            <span>Ouvir Áudio</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setSelectedModelAudio({
+                            id: youtubeResult.id || `yt_${Date.now()}`,
+                            title: youtubeResult.title,
+                            sampleBase64: youtubeResult.sampleBase64 || youtubeResult.audioBase64 || undefined,
+                            streamUrl: youtubeResult.streamUrl || undefined,
+                            transcript: mirrorText || youtubeResult.transcript,
+                          });
+                          setMirrorSuccessMsg(`🎯 Modelo "${youtubeResult.title}" ativado como referência de voz!`);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs flex items-center space-x-1.5 transition cursor-pointer ${
+                          selectedModelAudio?.title === youtubeResult.title
+                            ? "bg-amber-500 text-black font-semibold shadow-lg shadow-amber-500/30"
+                            : "bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30"
+                        }`}
+                      >
+                        <Sparkles size={12} />
+                        <span>{selectedModelAudio?.title === youtubeResult.title ? "Modelo Ativo" : "Usar como Modelo"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Salvar no Banco de Dados em Pastas */}
+                  <div className="p-3.5 rounded-2xl bg-zinc-900/40 border border-white/[0.08] flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center space-x-2 text-xs text-zinc-300">
+                      <Folder size={14} className="text-amber-400" />
+                      <span>Salvar no Banco na Pasta:</span>
+                      <select
+                        value={selectedFolderForSave}
+                        onChange={(e) => setSelectedFolderForSave(e.target.value)}
+                        className="bg-zinc-950 border border-white/10 rounded-xl px-2.5 py-1 text-xs text-white focus:outline-none focus:border-amber-400"
+                      >
+                        {libraryFolders.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
                     <button
-                      onClick={handleToggleYoutubeAudio}
-                      className="px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 hover:text-white flex items-center space-x-1.5 transition self-start sm:self-auto cursor-pointer"
+                      onClick={() => handleSaveToLibrary()}
+                      disabled={isSavingToLibrary}
+                      className="px-3.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 hover:text-white text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer disabled:opacity-40"
                     >
-                      {isPlayingYoutubeAudio ? (
+                      {isSavingToLibrary ? (
                         <>
-                          <Pause size={12} fill="currentColor" />
-                          <span>Pausar Original</span>
+                          <RefreshCw size={12} className="animate-spin" />
+                          <span>Salvando...</span>
                         </>
                       ) : (
                         <>
-                          <Play size={12} fill="currentColor" />
-                          <span>Ouvir Amostra</span>
+                          <BookmarkPlus size={12} />
+                          <span>Salvar no Banco de Dados</span>
                         </>
                       )}
                     </button>
@@ -1808,10 +2139,76 @@ export default function VnTtsStudio() {
 
                   {/* Mirroring & Synthesis Box */}
                   <div className="p-4 rounded-2xl bg-zinc-900/60 border border-white/[0.08] space-y-3">
+                    {/* Painel do Modelo Ativo com Seletor de Modo */}
+                    {selectedModelAudio && (
+                      <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-amber-300 flex items-center space-x-1.5">
+                            <Sparkles size={13} className="text-amber-400" />
+                            <span>Modelo de Referência Ativo: <strong>{selectedModelAudio.title}</strong></span>
+                            {selectedModelAudio.folderName && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200">
+                                {selectedModelAudio.folderName}
+                              </span>
+                            )}
+                          </span>
+                          <button
+                            onClick={() => setSelectedModelAudio(null)}
+                            className="text-[10px] text-zinc-400 hover:text-white underline cursor-pointer"
+                          >
+                            Voltar à Voz Padrão
+                          </button>
+                        </div>
+
+                        {/* Modos de Comportamento */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setVoiceModelMode("my-voice-cadence")}
+                            className={`p-2.5 rounded-xl border text-left transition flex items-start space-x-2.5 cursor-pointer ${
+                              voiceModelMode === "my-voice-cadence"
+                                ? "bg-amber-500/20 border-amber-400/60 text-white shadow-lg shadow-amber-950/40"
+                                : "bg-zinc-900/60 border-white/10 text-zinc-400 hover:text-zinc-200"
+                            }`}
+                          >
+                            <div className={`mt-0.5 w-3 h-3 rounded-full border flex items-center justify-center shrink-0 ${voiceModelMode === "my-voice-cadence" ? "border-amber-400 bg-amber-400" : "border-zinc-500"}`}>
+                              {voiceModelMode === "my-voice-cadence" && <div className="w-1 h-1 rounded-full bg-black"></div>}
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-white">Minha Voz + Jeito & Sotaque do Vídeo</div>
+                              <div className="text-[10px] text-zinc-400 leading-tight mt-0.5">
+                                Preserva seu timbre autoral de voz, mas adota a cadência, tom, velocidade e malícia do modelo.
+                              </div>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setVoiceModelMode("exact-video-voice")}
+                            className={`p-2.5 rounded-xl border text-left transition flex items-start space-x-2.5 cursor-pointer ${
+                              voiceModelMode === "exact-video-voice"
+                                ? "bg-red-500/20 border-red-400/60 text-white shadow-lg shadow-red-950/40"
+                                : "bg-zinc-900/60 border-white/10 text-zinc-400 hover:text-zinc-200"
+                            }`}
+                          >
+                            <div className={`mt-0.5 w-3 h-3 rounded-full border flex items-center justify-center shrink-0 ${voiceModelMode === "exact-video-voice" ? "border-red-400 bg-red-400" : "border-zinc-500"}`}>
+                              {voiceModelMode === "exact-video-voice" && <div className="w-1 h-1 rounded-full bg-black"></div>}
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-white">Voz e Timbre Idênticos ao Vídeo</div>
+                              <div className="text-[10px] text-zinc-400 leading-tight mt-0.5">
+                                Clonagem acústica direta do locutor do vídeo, reproduzindo 100% o timbre original com fidelidade.
+                              </div>
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <span className="text-[11px] font-semibold text-zinc-300 flex items-center space-x-1.5">
                         <Sparkles size={12} className="text-amber-400" />
-                        <span>Roteiro de Fala & Espelhamento Vocal</span>
+                        <span>Roteiro de Fala para Sintetizar</span>
                       </span>
 
                       {/* Botão para recarregar ou extrair a fala original do vídeo */}
@@ -1838,7 +2235,7 @@ export default function VnTtsStudio() {
                     {youtubeResult.subtitlesDisabled && !youtubeResult.transcript && (
                       <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-200/90 flex items-center space-x-2">
                         <AlertCircle size={13} className="shrink-0 text-amber-400" />
-                        <span>Legendas desativadas pelo canal no YouTube. Digite a fala ou o roteiro abaixo para reproduzir com a sua voz:</span>
+                        <span>Legendas desativadas pelo canal no YouTube. Digite a frase ou o roteiro abaixo para reproduzir com a sua voz:</span>
                       </div>
                     )}
 
@@ -1873,21 +2270,25 @@ export default function VnTtsStudio() {
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                       <div className="flex items-center space-x-2">
-                        {/* AÇÃO PRINCIPAL EM DESTAQUE: FALAR A MESMA COISA DO VÍDEO */}
+                        {/* AÇÃO PRINCIPAL EM DESTAQUE: SINTETIZAR COM A CADÊNCIA / TIMBRE */}
                         <button
-                          onClick={handleSpeakSameThing}
+                          onClick={() => handleSynthesizeMirror()}
                           disabled={isSynthesizingMirror}
                           className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-semibold text-xs flex items-center space-x-2 shadow-xl shadow-red-950/50 hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer disabled:opacity-40"
                         >
                           {isSynthesizingMirror ? (
                             <>
                               <RefreshCw size={13} className="animate-spin" />
-                              <span>Sintetizando com Sua Voz...</span>
+                              <span>Sintetizando Fala...</span>
                             </>
                           ) : (
                             <>
                               <Mic size={13} />
-                              <span>Falar a Mesma Coisa do Vídeo</span>
+                              <span>
+                                {voiceModelMode === "exact-video-voice"
+                                  ? "Gerar com Timbre Idêntico ao Vídeo"
+                                  : "Falar com Minha Voz & Jeito do Modelo"}
+                              </span>
                             </>
                           )}
                         </button>
@@ -1900,12 +2301,12 @@ export default function VnTtsStudio() {
                             {isPlayingMirrorAudio ? (
                               <>
                                 <Pause size={12} fill="currentColor" />
-                                <span>Pausar Minha Voz</span>
+                                <span>Pausar Áudio</span>
                               </>
                             ) : (
                               <>
                                 <Play size={12} fill="currentColor" />
-                                <span>Ouvir Minha Voz</span>
+                                <span>Ouvir Resultado</span>
                               </>
                             )}
                           </button>
@@ -1913,14 +2314,6 @@ export default function VnTtsStudio() {
                       </div>
 
                       <div className="flex items-center space-x-2">
-                        <button
-                          onClick={handleSaveYoutubeAnchor}
-                          className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 hover:text-white transition cursor-pointer flex items-center space-x-1"
-                        >
-                          <BookmarkPlus size={12} />
-                          <span>Salvar no Acervo</span>
-                        </button>
-
                         <button
                           onClick={handleSendYoutubeToDispatch}
                           className="px-3 py-1.5 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/40 border border-emerald-500/40 text-xs text-emerald-300 transition cursor-pointer flex items-center space-x-1"
@@ -1933,6 +2326,201 @@ export default function VnTtsStudio() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* ======================================================== */}
+            {/* NOVO MÓDULO: BANCO DE DADOS DE ÁUDIOS & PASTAS DE MODELOS */}
+            {/* ======================================================== */}
+            <div className="apple-glass rounded-3xl p-6 sm:p-7 space-y-5 border border-white/10 bg-zinc-950/60">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center space-x-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                    <Folder size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
+                      Banco de Dados de Modelos & Pastas
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-zinc-300 font-normal">
+                        {libraryAudios.length} áudios salvos
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-zinc-400">
+                      Organize os áudios extraídos em pastas e ative qualquer um como modelo de estilo e cadência.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowNewFolderModal(true)}
+                  className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 hover:text-white flex items-center space-x-1.5 transition self-start sm:self-auto cursor-pointer"
+                >
+                  <FolderPlus size={13} className="text-amber-400" />
+                  <span>Nova Pasta</span>
+                </button>
+              </div>
+
+              {/* Modal de Criação de Pasta */}
+              {showNewFolderModal && (
+                <div className="p-3.5 rounded-2xl bg-zinc-900 border border-amber-500/30 space-y-3 animate-in fade-in">
+                  <div className="flex items-center justify-between text-xs text-white font-medium">
+                    <span>Criar Nova Pasta no Banco de Dados</span>
+                    <button
+                      onClick={() => setShowNewFolderModal(false)}
+                      className="text-zinc-500 hover:text-white"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="text"
+                      value={newFolderNameInput}
+                      onChange={(e) => setNewFolderNameInput(e.target.value)}
+                      placeholder="Nome da pasta (ex: Podcasts, Rádio SP, Comédia...)"
+                      className="flex-1 bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                    />
+                    <button
+                      onClick={handleCreateFolder}
+                      disabled={!newFolderNameInput.trim()}
+                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold cursor-pointer disabled:opacity-40"
+                    >
+                      Criar Pasta
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Abas das Pastas */}
+              <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <button
+                  onClick={() => setActiveFolderFilter("todos")}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition cursor-pointer ${
+                    activeFolderFilter === "todos"
+                      ? "bg-white text-black shadow-md"
+                      : "bg-zinc-900 text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  Todas ({libraryAudios.length})
+                </button>
+                {libraryFolders.map((f) => {
+                  const count = libraryAudios.filter((a) => a.folderId === f.id).length;
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => setActiveFolderFilter(f.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition cursor-pointer flex items-center space-x-1.5 ${
+                        activeFolderFilter === f.id
+                          ? "bg-amber-500 text-black shadow-md"
+                          : "bg-zinc-900 text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      <span>{f.name}</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${activeFolderFilter === f.id ? "bg-black/20 text-black" : "bg-white/10 text-zinc-400"}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Lista de Áudios Salvos */}
+              <div className="space-y-2.5">
+                {isLibraryLoading ? (
+                  <div className="text-center py-6 text-xs text-zinc-500 flex items-center justify-center space-x-2">
+                    <RefreshCw size={13} className="animate-spin text-zinc-400" />
+                    <span>Carregando modelos do acervo...</span>
+                  </div>
+                ) : libraryAudios.length === 0 ? (
+                  <div className="text-center py-8 rounded-2xl border border-dashed border-white/10 text-xs text-zinc-500 space-y-1">
+                    <p>Nenhum áudio salvo no banco de dados ainda.</p>
+                    <p className="text-[11px] text-zinc-600">
+                      Cole um link do YouTube acima, extraia e clique em "Salvar no Banco de Dados".
+                    </p>
+                  </div>
+                ) : (
+                  libraryAudios
+                    .filter((a) => activeFolderFilter === "todos" || a.folderId === activeFolderFilter)
+                    .map((item) => {
+                      const isActive = selectedModelAudio?.id === item.id;
+                      const isPlaying = playingLibraryAudioId === item.id;
+                      return (
+                        <div
+                          key={item.id}
+                          className={`p-3 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                            isActive
+                              ? "bg-amber-500/10 border-amber-500/40 shadow-lg shadow-amber-950/20"
+                              : "bg-zinc-900/60 border-white/[0.06] hover:border-white/20"
+                          }`}
+                        >
+                          <div className="flex items-center space-x-3 min-w-0 flex-1">
+                            <div className="w-9 h-9 rounded-xl bg-zinc-800 border border-white/10 flex items-center justify-center text-zinc-300 shrink-0">
+                              <FileAudio size={16} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-medium text-white truncate flex items-center gap-1.5">
+                                <span>{item.title}</span>
+                                {isActive && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-400 text-black font-semibold">
+                                    ATIVO
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center space-x-2 text-[10px] text-zinc-400 mt-0.5">
+                                <span className="text-amber-300/80">{item.folderName}</span>
+                                <span>•</span>
+                                <span>{item.duration || `${item.timeRange}`}</span>
+                                <span>•</span>
+                                <span>{item.sizeKb} KB</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-2 self-end sm:self-auto">
+                            {/* Ouvir Áudio do Banco */}
+                            <button
+                              onClick={() => handleToggleLibraryAudioPlay(item)}
+                              className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 hover:text-white flex items-center space-x-1 transition cursor-pointer"
+                            >
+                              {isPlaying ? (
+                                <>
+                                  <Pause size={11} fill="currentColor" />
+                                  <span>Pausar</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Play size={11} fill="currentColor" />
+                                  <span>Ouvir</span>
+                                </>
+                              )}
+                            </button>
+
+                            {/* Ativar como Modelo */}
+                            <button
+                              onClick={() => handleSelectModelFromLibrary(item)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer ${
+                                isActive
+                                  ? "bg-amber-400 text-black shadow-md shadow-amber-400/30"
+                                  : "bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40"
+                              }`}
+                            >
+                              <Sparkles size={11} />
+                              <span>{isActive ? "Modelo Ativo" : "Usar como Modelo"}</span>
+                            </button>
+
+                            {/* Deletar */}
+                            <button
+                              onClick={() => handleDeleteLibraryAudio(item.id)}
+                              className="p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                              title="Remover do banco"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
             </div>
 
             {/* Recording & Input Station */}

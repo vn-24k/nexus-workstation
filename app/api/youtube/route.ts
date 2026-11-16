@@ -52,6 +52,12 @@ export async function POST(req: NextRequest) {
     }
 
     const data = await bridgeRes.json();
+    if (data.streamUrl && !data.streamUrl.startsWith("http")) {
+      data.streamUrl = `${targetBridge}${data.streamUrl}`;
+    }
+    if (data.sampleUrl && !data.sampleUrl.startsWith("http")) {
+      data.sampleUrl = `${targetBridge}${data.sampleUrl}`;
+    }
     return NextResponse.json(data);
   } catch (err: any) {
     if (err.name === "AbortError") {
