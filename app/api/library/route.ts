@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
       ok: true,
       folders: [
         { id: "geral", name: "Geral", icon: "folder" },
+        { id: "vozes-geradas", name: "Minhas Vozes Geradas", icon: "mic" },
         { id: "girias-sp", name: "Gírias SP & Quebrada", icon: "zap" },
         { id: "policia-investigacao", name: "Polícia & Interceptações", icon: "shield" },
         { id: "entrevistas-podcasts", name: "Podcasts & Entrevistas", icon: "mic" }

@@ -43,6 +43,7 @@ import {
   Shield,
   FileAudio,
   CheckCheck,
+  Database,
 } from "lucide-react";
 
 interface LibraryFolder {
@@ -212,6 +213,7 @@ export default function VnTtsStudio() {
   // Library & Folders State (Banco de Dados de Áudios e Modelos)
   const [libraryFolders, setLibraryFolders] = useState<LibraryFolder[]>([
     { id: "geral", name: "Geral", icon: "folder" },
+    { id: "vozes-geradas", name: "Minhas Vozes Geradas", icon: "mic" },
     { id: "girias-sp", name: "Gírias SP & Quebrada", icon: "zap" },
     { id: "policia-investigacao", name: "Polícia & Interceptações", icon: "shield" },
     { id: "entrevistas-podcasts", name: "Podcasts & Entrevistas", icon: "mic" }
@@ -255,6 +257,8 @@ export default function VnTtsStudio() {
   const mirrorAudioRef = useRef<HTMLAudioElement | null>(null);
   const [mirrorSuccessMsg, setMirrorSuccessMsg] = useState<string | null>(null);
   const [isSavingGeneratedAudio, setIsSavingGeneratedAudio] = useState(false);
+  const [generatedAudioCustomTitle, setGeneratedAudioCustomTitle] = useState("");
+  const [generatedAudioTargetFolder, setGeneratedAudioTargetFolder] = useState("vozes-geradas");
 
   // Records / Acervo
   const [records, setRecords] = useState<RecordNote[]>([]);
@@ -526,6 +530,9 @@ export default function VnTtsStudio() {
       setDispatchAudioBlob(blob);
       setDispatchAudioUrl(audioUrl);
       setDispatchAudioSourceText(textToSynthesize);
+      setGeneratedAudioCustomTitle(
+        textToSynthesize.length > 40 ? `${textToSynthesize.substring(0, 40)}...` : textToSynthesize
+      );
     } catch (err) {
       console.error(err);
       alert("Não foi possível gerar a síntese vocal no momento.");
@@ -983,10 +990,10 @@ export default function VnTtsStudio() {
       });
       const audioBase64 = await base64Promise;
 
-      const title = textSpoken
-        ? `Voz Gerada: ${textSpoken.substring(0, 35)}${textSpoken.length > 35 ? "..." : ""}`
-        : `Voz Gerada (${modelName.substring(0, 25)})`;
-      const folderId = targetFolderId || selectedFolderForSave || "vozes-geradas";
+      const title = generatedAudioCustomTitle.trim() || (textSpoken
+        ? `Voz: ${textSpoken.substring(0, 35)}${textSpoken.length > 35 ? "..." : ""}`
+        : `Voz Gerada (${modelName.substring(0, 25)})`);
+      const folderId = targetFolderId || generatedAudioTargetFolder || "vozes-geradas";
 
       const res = await fetch("/api/library", {
         method: "POST",
@@ -1003,14 +1010,15 @@ export default function VnTtsStudio() {
       });
 
       const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Falha ao salvar voz no acervo.");
+      if (!res.ok || !data.ok) throw new Error(data.error || "Falha ao salvar voz no banco de dados.");
 
       if (data.audios) setLibraryAudios(data.audios);
-      setMirrorSuccessMsg(`Áudio com sua voz gerada salvo com sucesso na pasta "${data.audio?.folderName || 'Minhas Vozes Geradas'}" do Acervo!`);
-      alert(`Áudio com sua voz gerada salvo com sucesso no Acervo! Acesse a aba "Acervo & Pastas" para ouvi-lo ou usá-lo.`);
+      const targetFolderName = data.audio?.folderName || "Minhas Vozes Geradas";
+      setMirrorSuccessMsg(`Áudio com sua voz gerada salvo com sucesso no banco de dados na pasta "${targetFolderName}"!`);
+      alert(`Áudio com sua voz gerada foi salvo com sucesso no banco de dados na pasta "${targetFolderName}"! Acesse a aba "Acervo & Pastas" para ouvi-lo ou usá-lo a qualquer momento.`);
     } catch (err: any) {
       console.error(err);
-      alert(`Erro ao salvar voz gerada: ${err.message || 'Falha ao salvar.'}`);
+      alert(`Erro ao salvar voz gerada no banco de dados: ${err.message || 'Falha ao salvar.'}`);
     } finally {
       setIsSavingGeneratedAudio(false);
     }
@@ -1247,6 +1255,9 @@ export default function VnTtsStudio() {
       setMirrorAudioBlob(blob);
       const url = URL.createObjectURL(blob);
       setMirrorAudioUrl(url);
+      setGeneratedAudioCustomTitle(
+        textToSpeak.length > 40 ? `${textToSpeak.substring(0, 40)}...` : textToSpeak
+      );
       setMirrorSuccessMsg(
         mode === "my-voice-cadence"
           ? "Áudio sintetizado com sua voz adotando a cadência, tom e sotaque do modelo!"
@@ -1864,47 +1875,84 @@ export default function VnTtsStudio() {
                   </div>
                 </div>
 
-                {/* Dispatch Trigger Buttons */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-                  <button
-                    onClick={() => handleSendToWhatsApp()}
-                    disabled={isSendingWhatsApp}
-                    className="py-3 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center space-x-1.5 transition shadow-lg shadow-emerald-900/20 disabled:opacity-40"
-                  >
-                    {isSendingWhatsApp ? (
-                      <RefreshCw size={13} className="animate-spin" />
-                    ) : (
-                      <MessageCircle size={14} />
-                    )}
-                    <span>Disparar WhatsApp</span>
-                  </button>
+                {/* Painel: Salvar no Banco de Dados */}
+                <div className="p-3.5 rounded-2xl bg-zinc-950/60 border border-emerald-500/20 space-y-2.5">
+                  <div className="flex items-center space-x-1.5 text-xs font-semibold text-emerald-300">
+                    <Database size={13} className="text-emerald-400" />
+                    <span>Salvar Áudio com Minha Voz no Banco de Dados</span>
+                  </div>
 
-                  <button
-                    onClick={() => handleSaveGeneratedAudio("dispatch")}
-                    disabled={isSavingGeneratedAudio}
-                    className="py-3 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-medium text-xs flex items-center justify-center space-x-1.5 transition border border-emerald-500/30 cursor-pointer"
-                  >
-                    {isSavingGeneratedAudio ? (
-                      <>
-                        <RefreshCw size={13} className="animate-spin text-emerald-400" />
-                        <span>Salvando Voz...</span>
-                      </>
-                    ) : (
-                      <>
-                        <BookmarkPlus size={14} className="text-emerald-400" />
-                        <span>Salvar Minha Voz no Acervo</span>
-                      </>
-                    )}
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-zinc-400 block mb-1">Título no Banco de Dados:</label>
+                      <input
+                        type="text"
+                        value={generatedAudioCustomTitle}
+                        onChange={(e) => setGeneratedAudioCustomTitle(e.target.value)}
+                        placeholder="Nome para este áudio..."
+                        className="w-full bg-zinc-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-400"
+                      />
+                    </div>
 
-                  <a
-                    href={dispatchAudioUrl}
-                    download="mensagem_vocal.mp3"
-                    className="py-3 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium text-xs flex items-center justify-center space-x-1.5 transition border border-white/[0.06]"
-                  >
-                    <Download size={13} />
-                    <span>Baixar MP3</span>
-                  </a>
+                    <div>
+                      <label className="text-[10px] text-zinc-400 block mb-1">Pasta no Banco de Dados:</label>
+                      <select
+                        value={generatedAudioTargetFolder}
+                        onChange={(e) => setGeneratedAudioTargetFolder(e.target.value)}
+                        className="w-full bg-zinc-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-400 cursor-pointer"
+                      >
+                        {libraryFolders.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            📁 {f.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSaveGeneratedAudio("dispatch")}
+                      disabled={isSavingGeneratedAudio}
+                      className="py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold flex items-center justify-center space-x-1.5 transition shadow-lg shadow-emerald-500/20 cursor-pointer disabled:opacity-50"
+                    >
+                      {isSavingGeneratedAudio ? (
+                        <>
+                          <RefreshCw size={13} className="animate-spin" />
+                          <span>Gravando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Database size={13} />
+                          <span>Salvar no Banco</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSendToWhatsApp()}
+                      disabled={isSendingWhatsApp}
+                      className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center space-x-1.5 transition shadow-lg shadow-emerald-900/20 disabled:opacity-40 cursor-pointer"
+                    >
+                      {isSendingWhatsApp ? (
+                        <RefreshCw size={13} className="animate-spin" />
+                      ) : (
+                        <MessageCircle size={14} />
+                      )}
+                      <span>Disparar WhatsApp</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadGeneratedAudio("dispatch")}
+                      className="py-2.5 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium text-xs flex items-center justify-center space-x-1.5 transition border border-white/[0.06] cursor-pointer"
+                    >
+                      <Download size={13} />
+                      <span>Baixar MP3</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -2424,56 +2472,6 @@ export default function VnTtsStudio() {
                             </>
                           )}
                         </button>
-
-                        {mirrorAudioUrl && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={handleToggleMirrorAudio}
-                              className="px-3.5 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs flex items-center space-x-1.5 hover:bg-amber-500/30 transition cursor-pointer"
-                            >
-                              {isPlayingMirrorAudio ? (
-                                <>
-                                  <Pause size={12} fill="currentColor" />
-                                  <span>Pausar Áudio</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Play size={12} fill="currentColor" />
-                                  <span>Ouvir Voz Gerada</span>
-                                </>
-                              )}
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleSaveGeneratedAudio("mirror")}
-                              disabled={isSavingGeneratedAudio}
-                              className="px-3.5 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-xs flex items-center space-x-1.5 transition cursor-pointer font-medium"
-                            >
-                              {isSavingGeneratedAudio ? (
-                                <>
-                                  <RefreshCw size={12} className="animate-spin text-emerald-400" />
-                                  <span>Salvando Voz...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <BookmarkPlus size={12} className="text-emerald-400" />
-                                  <span>Salvar Minha Voz Gerada</span>
-                                </>
-                              )}
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadGeneratedAudio("mirror")}
-                              className="px-3 py-2 rounded-xl bg-zinc-800 border border-white/10 text-zinc-300 hover:text-white text-xs flex items-center space-x-1.5 transition cursor-pointer"
-                            >
-                              <Download size={12} />
-                              <span>Baixar MP3</span>
-                            </button>
-                          </>
-                        )}
                       </div>
 
                       <div className="flex items-center space-x-2">
@@ -2486,6 +2484,127 @@ export default function VnTtsStudio() {
                         </button>
                       </div>
                     </div>
+
+                    {/* ======================================================== */}
+                    {/* CARD DEDICADO: ÁUDIO GERADO & SALVAR NO BANCO DE DADOS   */}
+                    {/* ======================================================== */}
+                    {mirrorAudioUrl && (
+                      <div className="mt-4 p-4 rounded-2xl bg-gradient-to-br from-emerald-950/40 via-zinc-950/90 to-zinc-900/70 border border-emerald-500/30 space-y-3.5 shadow-xl shadow-black/40">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-white/5">
+                          <div className="flex items-center space-x-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                              <Database size={16} />
+                            </div>
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className="text-xs font-semibold text-white">
+                                  Áudio Gerado com Sua Voz
+                                </span>
+                                <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">
+                                  Voz Pronta
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-zinc-400">
+                                Salve no banco de dados na pasta que preferir ou faça download em MP3.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-2">
+                            <button
+                              type="button"
+                              onClick={handleToggleMirrorAudio}
+                              className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs flex items-center space-x-1.5 transition cursor-pointer font-medium"
+                            >
+                              {isPlayingMirrorAudio ? (
+                                <>
+                                  <Pause size={12} fill="currentColor" />
+                                  <span>Pausar</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Play size={12} fill="currentColor" />
+                                  <span>Ouvir Prévia</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadGeneratedAudio("mirror")}
+                              className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-zinc-200 text-xs flex items-center space-x-1.5 transition cursor-pointer"
+                            >
+                              <Download size={12} />
+                              <span>Baixar MP3</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Campos de Título e Pasta de Destino no Banco de Dados */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] text-zinc-400 font-medium block mb-1">
+                              Título no Banco de Dados:
+                            </label>
+                            <input
+                              type="text"
+                              value={generatedAudioCustomTitle}
+                              onChange={(e) => setGeneratedAudioCustomTitle(e.target.value)}
+                              placeholder="Ex: Minha voz estilo modelo YouTube..."
+                              className="w-full bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-400 transition"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] text-zinc-400 font-medium block mb-1">
+                              Pasta no Banco de Dados:
+                            </label>
+                            <select
+                              value={generatedAudioTargetFolder}
+                              onChange={(e) => setGeneratedAudioTargetFolder(e.target.value)}
+                              className="w-full bg-zinc-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-400 cursor-pointer"
+                            >
+                              {libraryFolders.map((f) => (
+                                <option key={f.id} value={f.id}>
+                                  📁 {f.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Botão Principal: Salvar no Banco de Dados */}
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveGeneratedAudio("mirror")}
+                            disabled={isSavingGeneratedAudio}
+                            className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-semibold text-xs flex items-center justify-center space-x-2 shadow-lg shadow-emerald-950/50 hover:scale-[1.01] active:scale-[0.99] transition cursor-pointer disabled:opacity-50"
+                          >
+                            {isSavingGeneratedAudio ? (
+                              <>
+                                <RefreshCw size={13} className="animate-spin" />
+                                <span>Gravando no Banco de Dados...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Database size={13} />
+                                <span>Salvar Áudio com Minha Voz no Banco de Dados</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleSendYoutubeToDispatch}
+                            className="w-full sm:w-auto px-4 py-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-xs text-zinc-300 hover:text-white transition cursor-pointer flex items-center justify-center space-x-1.5"
+                          >
+                            <ArrowRight size={12} />
+                            <span>Enviar p/ Disparo WhatsApp</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
