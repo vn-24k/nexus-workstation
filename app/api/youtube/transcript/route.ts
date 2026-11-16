@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 function getBridgeUrl(custom?: string): string {
   if (custom && custom.startsWith("http")) return custom.trim().replace(/\/$/, "");

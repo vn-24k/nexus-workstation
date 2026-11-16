@@ -165,6 +165,7 @@ export default function VnTtsStudio() {
     audioBase64: string;
     transcript?: string;
     transcriptLang?: string;
+    subtitlesDisabled?: boolean;
   } | null>(null);
   const [isFetchingTranscript, setIsFetchingTranscript] = useState(false);
   const [youtubeError, setYoutubeError] = useState<string | null>(null);
@@ -749,6 +750,9 @@ export default function VnTtsStudio() {
       if (data.transcript && data.transcript.trim()) {
         setMirrorText(data.transcript.trim());
         setMirrorSuccessMsg(`Fala original do vídeo detectada (${data.transcriptLang || 'PT'})! Clique em 'Falar a Mesma Coisa' para gerar.`);
+      } else if (data.subtitlesDisabled) {
+        setMirrorText("");
+        setMirrorSuccessMsg(`Áudio de ${data.duration || '60s'} extraído com sucesso! Como as legendas deste vídeo estão desativadas no YouTube, digite o que a pessoa falou para falar com sua voz.`);
       } else {
         setMirrorText(data.title ? `Fala espelhada: ${data.title}` : "");
       }
@@ -778,9 +782,14 @@ export default function VnTtsStudio() {
       if (data.ok && data.text) {
         setMirrorText(data.text.trim());
         if (youtubeResult) {
-          setYoutubeResult({ ...youtubeResult, transcript: data.text.trim(), transcriptLang: data.language });
+          setYoutubeResult({ ...youtubeResult, transcript: data.text.trim(), transcriptLang: data.language, subtitlesDisabled: false });
         }
         setMirrorSuccessMsg(`Fala capturada com sucesso (${data.language || 'PT'})! Pronto para gerar.`);
+      } else if (data.subtitlesDisabled) {
+        if (youtubeResult) {
+          setYoutubeResult({ ...youtubeResult, subtitlesDisabled: true });
+        }
+        setYoutubeError("Legendas desativadas pelo criador deste vídeo no YouTube. Digite a frase falada na caixa abaixo.");
       } else {
         setYoutubeError(data.error || "Não foi possível extrair a fala automática deste trecho.");
       }
@@ -799,7 +808,7 @@ export default function VnTtsStudio() {
       setMirrorText(textToSpeak);
     }
 
-    if (!textToSpeak && youtubeUrl) {
+    if (!textToSpeak && youtubeUrl && !youtubeResult?.subtitlesDisabled) {
       setIsSynthesizingMirror(true);
       try {
         const res = await fetch("/api/youtube/transcript", {
@@ -818,12 +827,20 @@ export default function VnTtsStudio() {
           if (youtubeResult) {
             setYoutubeResult({ ...youtubeResult, transcript: data.text.trim(), transcriptLang: data.language });
           }
+        } else if (data.subtitlesDisabled) {
+          if (youtubeResult) {
+            setYoutubeResult({ ...youtubeResult, subtitlesDisabled: true });
+          }
         }
       } catch (e) {}
     }
 
     if (!textToSpeak) {
-      setYoutubeError("Nenhuma fala detectada automaticamente. Digite o que o vídeo falou no campo de roteiro.");
+      if (youtubeResult?.subtitlesDisabled) {
+        setYoutubeError("As legendas deste vídeo estão desativadas no YouTube. Digite o que a pessoa falou na caixa abaixo para sintetizar com a sua voz.");
+      } else {
+        setYoutubeError("Nenhuma fala detectada automaticamente. Digite o que o vídeo falou no campo de roteiro.");
+      }
       setIsSynthesizingMirror(false);
       return;
     }
@@ -1816,6 +1833,14 @@ export default function VnTtsStudio() {
                         )}
                       </button>
                     </div>
+
+                    {/* Aviso sutil quando o vídeo não possui legendas no YouTube */}
+                    {youtubeResult.subtitlesDisabled && !youtubeResult.transcript && (
+                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-200/90 flex items-center space-x-2">
+                        <AlertCircle size={13} className="shrink-0 text-amber-400" />
+                        <span>Legendas desativadas pelo canal no YouTube. Digite a fala ou o roteiro abaixo para reproduzir com a sua voz:</span>
+                      </div>
+                    )}
 
                     {/* Exibição da fala detectada no vídeo */}
                     {youtubeResult.transcript && (
