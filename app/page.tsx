@@ -51,6 +51,8 @@ import {
   Heart,
   ChevronRight,
   BookMarked,
+  XCircle,
+  Undo2,
 } from "lucide-react";
 import lexiconData from "@/lib/lexicon_data.json";
 
@@ -150,8 +152,10 @@ export default function VnTtsStudio() {
 
   // Dispatch Tab (Disparo Vocal)
   const [dispatchText, setDispatchText] = useState("");
+  const [originalUserText, setOriginalUserText] = useState("");
   const [selectedContact, setSelectedContact] = useState(PRESET_CONTACTS[0]);
   const [customPhone, setCustomPhone] = useState("");
+  const [recentCustomPhones, setRecentCustomPhones] = useState<string[]>([]);
   const [dispatchMood, setDispatchMood] = useState<string>("sp");
   const [isSynthesizingDispatch, setIsSynthesizingDispatch] = useState(false);
   const [dispatchAudioBlob, setDispatchAudioBlob] = useState<Blob | null>(null);
@@ -162,6 +166,12 @@ export default function VnTtsStudio() {
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [whatsappResult, setWhatsappResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [bridgeConnected, setBridgeConnected] = useState<boolean | null>(null);
+
+  // Safe Dispatch Countdown (Cancelamento Seguro de Envio)
+  const [sendCountdown, setSendCountdown] = useState<number | null>(null);
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
+  const [pendingSendText, setPendingSendText] = useState<string>("");
 
   // Voice Lab & Live Recording
   const [voiceAnchors, setVoiceAnchors] = useState<VoiceAnchor[]>([]);
@@ -276,20 +286,33 @@ export default function VnTtsStudio() {
   const [lexiconSearch, setLexiconSearch] = useState("");
   const [copiedTermId, setCopiedTermId] = useState<string | null>(null);
 
-  // Mapeamento de estilo para mood do motor
-  const handleSelectSpeechStyle = (style: "sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo") => {
+  // Mapeamento de estilo para mood do motor com AUTO-TRANSFORMAÇÃO IMEDIATA
+  const handleSelectSpeechStyle = async (style: "sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo") => {
     setSelectedSpeechStyle(style);
     if (style === "sp_quebrada") setDispatchMood("sp");
     else if (style === "executivo" || style === "tecnico_juridico") setDispatchMood("firme");
     else if (style === "persuasao") setDispatchMood("empolgado");
     else if (style === "afetivo") setDispatchMood("calmo");
+
+    // Auto-transformação em tempo real do texto com as palavras do usuário
+    const baseText = originalUserText.trim() || dispatchText.trim();
+    if (baseText) {
+      if (!originalUserText.trim()) {
+        setOriginalUserText(baseText);
+      }
+      await handleTransformDispatchText(style, baseText);
+    }
   };
 
   // Transformar texto para o estilo selecionado
-  const handleTransformDispatchText = async (targetStyle?: string) => {
+  const handleTransformDispatchText = async (targetStyle?: string, baseOverride?: string) => {
     const styleToUse = targetStyle || selectedSpeechStyle;
-    const currentText = dispatchText.trim();
+    const currentText = (baseOverride || originalUserText.trim() || dispatchText.trim());
     if (!currentText || isTransformingText) return;
+
+    if (!originalUserText.trim()) {
+      setOriginalUserText(currentText);
+    }
 
     setIsTransformingText(true);
     try {
@@ -306,6 +329,13 @@ export default function VnTtsStudio() {
       console.error("Erro ao transformar texto:", e);
     } finally {
       setIsTransformingText(false);
+    }
+  };
+
+  // Reverter texto adaptado para o que o usuário escreveu originalmente
+  const handleRevertToOriginal = () => {
+    if (originalUserText) {
+      handleDispatchTextChange(originalUserText);
     }
   };
 
@@ -380,7 +410,37 @@ export default function VnTtsStudio() {
         setRecords([]);
       }
     }
+
+    const recentPhonesSaved = localStorage.getItem("vntts_recent_phones");
+    if (recentPhonesSaved) {
+      try {
+        setRecentCustomPhones(JSON.parse(recentPhonesSaved));
+      } catch (e) {}
+    }
   }, []);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Salvar número recente no histórico local
+  const saveRecentPhone = (phoneNum: string) => {
+    const clean = phoneNum.replace(/\D/g, "");
+    if (!clean || clean.length < 8) return;
+    setRecentCustomPhones((prev) => {
+      const filtered = prev.filter((p) => p !== clean);
+      const updated = [clean, ...filtered].slice(0, 5);
+      try {
+        localStorage.setItem("vntts_recent_phones", JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
 
   function getDefaultMessages(): Message[] {
     return [
@@ -493,6 +553,12 @@ export default function VnTtsStudio() {
     }
     setDispatchAudioBlob(null);
     setDispatchAudioSourceText("");
+  };
+
+  // Quando o usuário digita livremente no campo de roteiro com as próprias palavras
+  const handleUserTypedText = (text: string) => {
+    setOriginalUserText(text);
+    handleDispatchTextChange(text);
   };
 
   // Play Speech (TTS in Chat)
@@ -646,9 +712,9 @@ export default function VnTtsStudio() {
       });
   };
 
-  // DISPATCH TAB: Direct Automated Voice Note (PTT) dispatch via WhatsApp Bridge (5511995685756)
-  const handleSendToWhatsApp = async (overrideText?: string) => {
-    const textToSend = (overrideText || dispatchText).trim();
+  // Execução final do disparo via WhatsApp Bridge
+  const executeSendToWhatsApp = async (overrideText?: string) => {
+    const textToSend = (overrideText || pendingSendText || dispatchText).trim();
     const targetPhone = selectedContact.id === "outro" ? customPhone.replace(/\D/g, "") : selectedContact.phone;
 
     if (!targetPhone) {
@@ -691,9 +757,16 @@ export default function VnTtsStudio() {
 
       const data = await res.json();
       if (data.ok) {
+        if (selectedContact.id === "outro") {
+          saveRecentPhone(targetPhone);
+        }
+        const recipientDisplay =
+          selectedContact.id === "outro"
+            ? (customPhone || targetPhone)
+            : `${selectedContact.name} (+${selectedContact.phone})`;
         setWhatsappResult({
           ok: true,
-          message: `Áudio PTT gravado na hora e entregue com sucesso para ${selectedContact.name || targetPhone} pelo seu WhatsApp (11995685756)!`,
+          message: `Áudio PTT gravado na hora e entregue com sucesso para ${recipientDisplay}! Transmitido pelo seu WhatsApp (+55 11 99568-5756).`,
         });
       } else {
         setWhatsappResult({
@@ -708,7 +781,77 @@ export default function VnTtsStudio() {
       });
     } finally {
       setIsSendingWhatsApp(false);
+      setPendingSendText("");
     }
+  };
+
+  // Safe Dispatch Countdown: Janela de segurança de 5 segundos para cancelamento prévio
+  const handleInitiateSend = (overrideText?: string) => {
+    const textToSend = (overrideText || dispatchText).trim();
+    const targetPhone = selectedContact.id === "outro" ? customPhone.replace(/\D/g, "") : selectedContact.phone;
+
+    if (!targetPhone) {
+      alert("Por favor, selecione ou informe o número do WhatsApp de destino.");
+      return;
+    }
+
+    if (!textToSend && !dispatchAudioBlob) {
+      alert("Por favor, digite uma mensagem ou gere o áudio antes de disparar.");
+      return;
+    }
+
+    // Limpa qualquer contador anterior ativo
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+
+    setPendingSendText(textToSend);
+    setCancelNotice(null);
+    setSendCountdown(5);
+
+    let count = 5;
+    countdownTimerRef.current = setInterval(() => {
+      count -= 1;
+      if (count <= 0) {
+        if (countdownTimerRef.current) {
+          clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+        }
+        setSendCountdown(null);
+        executeSendToWhatsApp(textToSend);
+      } else {
+        setSendCountdown(count);
+      }
+    }, 1000);
+  };
+
+  // Cancelar envio durante a contagem regressiva (aborto total sem tocar na rede)
+  const handleCancelSend = () => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setSendCountdown(null);
+    setCancelNotice("🛑 Envio cancelado pelo usuário! O áudio não foi transmitido para o WhatsApp.");
+    setTimeout(() => {
+      setCancelNotice(null);
+    }, 6000);
+  };
+
+  // Forçar envio imediato se não quiser aguardar os 5 segundos
+  const handleForceSendNow = () => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setSendCountdown(null);
+    executeSendToWhatsApp(pendingSendText || dispatchText);
+  };
+
+  // Alias para retrocompatibilidade
+  const handleSendToWhatsApp = (overrideText?: string) => {
+    handleInitiateSend(overrideText);
   };
 
   // Live Microphone Recording & AI Analysis Functions
@@ -1560,6 +1703,23 @@ export default function VnTtsStudio() {
     return matchCat && matchSearch;
   });
 
+  const cleanCustomDigits = customPhone.replace(/\D/g, "");
+  const formattedCustomPreview = cleanCustomDigits.startsWith("55")
+    ? `+${cleanCustomDigits}`
+    : cleanCustomDigits
+    ? `+55 ${cleanCustomDigits}`
+    : "";
+
+  const targetRecipientLabel =
+    selectedContact.id === "outro"
+      ? (formattedCustomPreview || "Outro Número Personalizado")
+      : `${selectedContact.name} (${selectedContact.phone.startsWith("55") ? `+55 ${selectedContact.phone.slice(2, 4)} ${selectedContact.phone.slice(4)}` : `+${selectedContact.phone}`})`;
+
+  const targetRecipientShortLabel =
+    selectedContact.id === "outro"
+      ? (formattedCustomPreview || "Outro Número")
+      : selectedContact.name;
+
   // Loading state
   if (isAuthenticated === null) {
     return (
@@ -1775,38 +1935,107 @@ export default function VnTtsStudio() {
               </div>
             )}
 
-            {/* Recipient Selection */}
+            {/* Recipient Selection (Contatos Pré-definidos e Opção Outro Número) */}
             <div className="apple-glass rounded-3xl p-5 space-y-3">
-              <label className="text-[11px] font-medium text-zinc-400 block px-1">
-                Destinatário no WhatsApp
-              </label>
+              <div className="flex items-center justify-between px-1">
+                <label className="text-[11px] font-semibold text-white flex items-center space-x-1.5">
+                  <MessageCircle size={13} className="text-emerald-400" />
+                  <span>Destinatário no WhatsApp</span>
+                </label>
+                <span className="text-[10px] text-zinc-400 font-mono">
+                  {selectedContact.id === "outro"
+                    ? (customPhone ? `Destino: +${customPhone.replace(/\D/g, "")}` : "Informe o número abaixo")
+                    : `Destino: +${selectedContact.phone}`}
+                </span>
+              </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {PRESET_CONTACTS.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => setSelectedContact(c)}
-                    className={`p-2.5 rounded-2xl border text-left transition flex items-center space-x-2 ${
-                      selectedContact.id === c.id
-                        ? "bg-white text-black border-white font-medium shadow-md"
-                        : "bg-zinc-900/50 text-zinc-300 border-white/[0.06] hover:bg-zinc-800"
-                    }`}
-                  >
-                    <span className="text-base">{c.icon}</span>
-                    <span className="text-xs truncate">{c.name}</span>
-                  </button>
-                ))}
+                {PRESET_CONTACTS.map((c) => {
+                  const isSelected = selectedContact.id === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setSelectedContact(c)}
+                      className={`p-2.5 rounded-2xl border text-left transition flex flex-col justify-between cursor-pointer ${
+                        isSelected
+                          ? "bg-white text-black border-white font-medium shadow-md scale-[1.01]"
+                          : "bg-zinc-900/50 text-zinc-300 border-white/[0.06] hover:bg-zinc-800"
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span className="text-base">{c.icon}</span>
+                        <span className="text-xs font-semibold truncate">{c.name}</span>
+                      </div>
+                      <span className={`text-[9px] mt-1.5 truncate font-mono ${isSelected ? "text-zinc-600" : "text-zinc-500"}`}>
+                        {c.id === "outro" ? (customPhone ? `+${customPhone.replace(/\D/g, "")}` : "Digitar número...") : `+${c.phone}`}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
               {selectedContact.id === "outro" && (
-                <div className="pt-2">
-                  <input
-                    type="tel"
-                    value={customPhone}
-                    onChange={(e) => setCustomPhone(e.target.value)}
-                    placeholder="DDD + Número (ex: 11999998888)"
-                    className="w-full bg-zinc-900/80 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-white/30"
-                  />
+                <div className="p-3.5 rounded-2xl bg-zinc-900/90 border border-emerald-500/30 space-y-2.5 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-emerald-300 flex items-center space-x-1">
+                      <Phone size={12} />
+                      <span>Digitar Outro Número de WhatsApp:</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const clip = await navigator.clipboard.readText();
+                          if (clip) setCustomPhone(clip);
+                        } catch (e) {}
+                      }}
+                      className="text-[10px] text-zinc-400 hover:text-white px-2 py-0.5 rounded-md bg-white/[0.06] hover:bg-white/[0.1] transition cursor-pointer"
+                    >
+                      Colar do Teclado
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      type="tel"
+                      value={customPhone}
+                      onChange={(e) => setCustomPhone(e.target.value)}
+                      placeholder="DDD + Número (ex: 11 99999-8888 ou +55 11 99999-8888)"
+                      className="w-full bg-black/60 border border-white/10 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none transition font-mono"
+                    />
+                  </div>
+
+                  {/* Pré-visualização do formato internacional */}
+                  {customPhone && (
+                    <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono px-1">
+                      <span>Número formatado:</span>
+                      <span className="text-emerald-400 font-semibold">
+                        +{customPhone.replace(/\D/g, "").startsWith("55")
+                          ? customPhone.replace(/\D/g, "")
+                          : `55${customPhone.replace(/\D/g, "")}`}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Histórico dos últimos números digitados */}
+                  {recentCustomPhones.length > 0 && (
+                    <div className="pt-1 border-t border-white/[0.06]">
+                      <span className="text-[10px] text-zinc-500 block mb-1">Números Recentes:</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {recentCustomPhones.map((ph, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setCustomPhone(ph)}
+                            className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-black/40 border border-white/10 text-zinc-400 hover:text-white hover:border-emerald-500/40 transition cursor-pointer"
+                          >
+                            +{ph}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1871,7 +2100,7 @@ export default function VnTtsStudio() {
                 <textarea
                   rows={3}
                   value={dispatchText}
-                  onChange={(e) => handleDispatchTextChange(e.target.value)}
+                  onChange={(e) => handleUserTypedText(e.target.value)}
                   placeholder={
                     selectedSpeechStyle === "sp_quebrada"
                       ? "Escreva a mensagem com suas palavras ou digite livremente para adaptar com gírias de SP..."
@@ -1888,7 +2117,7 @@ export default function VnTtsStudio() {
 
                 {/* Barra de Ações do Roteiro */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
-                  <div className="flex items-center space-x-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => handleTransformDispatchText()}
@@ -1903,15 +2132,31 @@ export default function VnTtsStudio() {
                       ) : (
                         <>
                           <Sparkles size={12} className="text-amber-400" />
-                          <span>Adaptar Frase para este Estilo</span>
+                          <span>Transformar Novamente</span>
                         </>
                       )}
                     </button>
 
+                    {/* Botão de Reverter para o Texto Original Digitado */}
+                    {originalUserText && originalUserText.trim() !== dispatchText.trim() && (
+                      <button
+                        type="button"
+                        onClick={handleRevertToOriginal}
+                        className="px-2.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-xs text-zinc-300 hover:text-white flex items-center space-x-1.5 transition cursor-pointer animate-in fade-in"
+                        title="Desfazer transformação e voltar ao texto original com suas próprias palavras"
+                      >
+                        <Undo2 size={12} className="text-zinc-400" />
+                        <span>Reverter para o original</span>
+                      </button>
+                    )}
+
                     {dispatchText && (
                       <button
                         type="button"
-                        onClick={() => handleDispatchTextChange("")}
+                        onClick={() => {
+                          setOriginalUserText("");
+                          handleDispatchTextChange("");
+                        }}
                         className="text-[11px] text-zinc-500 hover:text-zinc-300 px-2 py-1 transition cursor-pointer"
                       >
                         Limpar
@@ -1978,30 +2223,89 @@ export default function VnTtsStudio() {
                 </div>
               </div>
 
-              {/* Action Buttons: Direct Dispatch & Preview */}
-              <div className="space-y-2 pt-1">
-                <button
-                  onClick={() => handleSendToWhatsApp()}
-                  disabled={isSendingWhatsApp || isSynthesizingDispatch || !dispatchText.trim()}
-                  className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center space-x-2.5 transition shadow-xl shadow-emerald-900/30 disabled:opacity-30 active:scale-[0.99]"
-                >
-                  {isSendingWhatsApp ? (
-                    <>
-                      <RefreshCw size={14} className="animate-spin" />
-                      <span>Gravando e disparando áudio no WhatsApp...</span>
-                    </>
-                  ) : (
-                    <>
-                      <MessageCircle size={15} />
-                      <span>Disparar Áudio no WhatsApp (+55 11 99568-5756)</span>
-                    </>
-                  )}
-                </button>
+              {/* Action Buttons: Direct Dispatch with Safety Countdown & Preview */}
+              <div className="space-y-2.5 pt-1">
+                {sendCountdown !== null ? (
+                  <div className="p-4 rounded-2xl bg-red-950/70 border-2 border-red-500/80 shadow-2xl shadow-red-950/80 space-y-3 animate-in zoom-in-95 duration-150">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2 text-red-200">
+                        <Clock size={16} className="text-red-400 animate-spin" />
+                        <span className="text-xs font-bold uppercase tracking-wider">
+                          Enviando em {sendCountdown} segundos...
+                        </span>
+                      </div>
+                      <span className="text-[11px] bg-red-500/30 border border-red-500/50 text-red-200 px-2.5 py-0.5 rounded-full font-mono font-bold">
+                        00:0{sendCountdown}
+                      </span>
+                    </div>
+
+                    <div className="text-[11px] text-zinc-300 leading-snug">
+                      Destino: <strong className="text-white">{targetRecipientLabel}</strong>
+                      <div className="text-[10px] text-zinc-400 truncate mt-0.5 font-mono">
+                        "{dispatchText.length > 55 ? `${dispatchText.substring(0, 55)}...` : dispatchText}"
+                      </div>
+                    </div>
+
+                    {/* Botão de Cancelamento em Destaque Absoluto */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleCancelSend}
+                        className="w-full py-3.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-lg shadow-red-900/50 cursor-pointer active:scale-95"
+                      >
+                        <XCircle size={16} />
+                        <span>🛑 CANCELAR ENVIO AGORA</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleForceSendNow}
+                        className="w-full py-3.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white font-medium text-xs flex items-center justify-center space-x-1.5 transition border border-white/10 cursor-pointer"
+                      >
+                        <Zap size={14} className="text-amber-400" />
+                        <span>Disparar Imediatamente</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <button
+                      onClick={() => handleInitiateSend()}
+                      disabled={isSendingWhatsApp || isSynthesizingDispatch || !dispatchText.trim()}
+                      className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center space-x-2.5 transition shadow-xl shadow-emerald-900/30 disabled:opacity-30 active:scale-[0.99] cursor-pointer"
+                    >
+                      {isSendingWhatsApp ? (
+                        <>
+                          <RefreshCw size={14} className="animate-spin" />
+                          <span>Gravando e transmitindo áudio no WhatsApp...</span>
+                        </>
+                      ) : (
+                        <>
+                          <MessageCircle size={15} />
+                          <span>Disparar Áudio para {targetRecipientShortLabel}</span>
+                        </>
+                      )}
+                    </button>
+
+                    <div className="flex items-center justify-between px-1 text-[10px] text-zinc-500 font-mono">
+                      <span>Emissor: Seu WhatsApp (+55 11 99568-5756)</span>
+                      <span className="text-emerald-400/80 font-medium">➔ Para: {targetRecipientLabel}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Cancel Notice Feedback */}
+                {cancelNotice && (
+                  <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/40 text-red-200 text-xs flex items-center space-x-2 animate-in fade-in duration-200">
+                    <XCircle size={15} className="text-red-400 shrink-0" />
+                    <span>{cancelNotice}</span>
+                  </div>
+                )}
 
                 <button
                   onClick={handleSynthesizeDispatch}
                   disabled={isSynthesizingDispatch || isSendingWhatsApp || !dispatchText.trim()}
-                  className="w-full py-2.5 rounded-2xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-white/[0.08] font-medium text-xs flex items-center justify-center space-x-2 transition disabled:opacity-30"
+                  className="w-full py-2.5 rounded-2xl bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-white/[0.08] font-medium text-xs flex items-center justify-center space-x-2 transition disabled:opacity-30 cursor-pointer"
                 >
                   {isSynthesizingDispatch ? (
                     <>
@@ -2142,7 +2446,7 @@ export default function VnTtsStudio() {
                       ) : (
                         <MessageCircle size={14} />
                       )}
-                      <span>Disparar WhatsApp</span>
+                      <span>Disparar para {targetRecipientShortLabel}</span>
                     </button>
 
                     <button
