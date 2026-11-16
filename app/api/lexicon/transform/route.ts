@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || "";
 const HF_TOKEN = process.env.HF_TOKEN || "";
 const HF_BEST_MODEL = "meta-llama/Llama-3.3-70B-Instruct";
 
@@ -290,7 +291,80 @@ export async function POST(req: NextRequest) {
     };
     const styleKey = STYLE_ALIASES[style] || (RULES_CATALOG[style] ? style : "sp_quebrada");
 
-    // 1. TENTATIVA COM HUGGING FACE ROUTER (se houver chave configurada)
+    // 1. MOTOR PRIMÁRIO DE RACIOCÍNIO E INTERPRETAÇÃO SEMÂNTICA (Google Gemini 3.5 Flash)
+    if (GOOGLE_API_KEY) {
+      try {
+        const geminiController = new AbortController();
+        const geminiTimeout = setTimeout(() => geminiController.abort(), 7500);
+
+        const STYLE_REASONING_PROMPTS: Record<string, string> = {
+          sp_quebrada: `Você é um profundo conhecedor do dialeto e da malandragem autêntica da quebrada e das ruas de São Paulo.
+Sua missão: Raciocine sobre a intenção, o sentimento e o contexto da mensagem a seguir. Não faça tradução literal ou substituição mecânica de palavras soltas. Reescreva a mensagem inteira de forma 100% natural, fluida e espontânea, exatamente como um paulistano legítimo falaria com um parceiro ou amigo no dia a dia.
+Utilize com naturalidade gírias paulistanas genuínas (ex: colar, trocar ideia, truta, parça, corre, trampo, embaçado, suave, se liga, demorô, chave, na moral, fita).
+Mantenha rigorosamente o significado e a intenção original.
+Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem explicações.`,
+
+          executivo: `Você é um executivo sênior e consultor estratégico de nível C-level corporativo.
+Sua missão: Raciocine sobre o contexto e a mensagem a seguir. Reescreva-a com linguagem corporativa refinada, diplomática, estratégica e orientada a resultados e entregáveis.
+A mensagem deve transmitir autoridade, elegância institucional e clareza de diretrizes corporativas, sem afetação excessiva.
+Mantenha rigorosamente o significado e a intenção original.
+Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem explicações.`,
+
+          tecnico_juridico: `Você é um jurista e analista com domínio absoluto da norma culta da língua portuguesa.
+Sua missão: Raciocine sobre os fatos e a intenção da mensagem a seguir. Reescreva-a em registro formal culto, analítico, inequívoco e preciso, fundamentando o teor da comunicação com sobriedade e excelência vernacular.
+Mantenha rigorosamente o significado e a intenção original.
+Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem explicações.`,
+
+          persuasao: `Você é um mestre em copywriting de alto impacto, psicologia de persuasão e negociação estratégica.
+Sua missão: Raciocine sobre o objetivo da mensagem a seguir. Reestruture-a de forma instigante, persuasiva, confiante e focada em valor, despertando urgência, relevância e clareza de decisão.
+Mantenha rigorosamente o significado e a intenção original.
+Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem explicações.`,
+
+          afetivo: `Você é uma pessoa calorosa, carinhosa e cheia de afeto genuíno para com quem você ama muito (sua namorada, mãe ou familiar querido).
+Sua missão: Raciocine sobre o afeto e a mensagem a seguir. Reescreva-a com imenso carinho, ternura, aconchego e amor verdadeiro, transmitindo proximidade e cuidado de forma doce e natural.
+Mantenha rigorosamente o significado e a intenção original.
+Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem explicações.`,
+        };
+
+        const systemPrompt = STYLE_REASONING_PROMPTS[styleKey] || STYLE_REASONING_PROMPTS.sp_quebrada;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GOOGLE_API_KEY}`;
+
+        const gResp = await fetch(geminiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{ text: `${systemPrompt}\n\nMensagem original para raciocinar e reescrever:\n"${cleanInput}"` }],
+            }],
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 600,
+            },
+          }),
+          signal: geminiController.signal,
+        });
+        clearTimeout(geminiTimeout);
+
+        if (gResp.ok) {
+          const gJson = await gResp.json();
+          const generated = gJson.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          if (generated) {
+            return NextResponse.json({
+              ok: true,
+              original: cleanInput,
+              adapted: generated.replace(/^["']|["']$/g, "").trim(),
+              style: styleKey,
+              engine: "gemini-3.5-flash-lite",
+              model: "gemini-3.5-flash-lite",
+            });
+          }
+        }
+      } catch (geminiErr) {
+        console.warn("Motor semântico primário indisponível ou timeout, prosseguindo com fallbacks:", geminiErr);
+      }
+    }
+
+    // 2. TENTATIVA COM HUGGING FACE ROUTER (se houver chave configurada)
     if (HF_TOKEN) {
       try {
         const hfController = new AbortController();
@@ -340,7 +414,7 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (e) {
-        // Fallback imediato para o motor local protegido
+        // Fallback para o motor local protegido
       }
     }
 

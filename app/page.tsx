@@ -281,16 +281,13 @@ export default function VnTtsStudio() {
   // Lexicon & Speech Styles (Dicionário de Gírias SP + Biblioteca Técnica/Profissional)
   const [selectedSpeechStyle, setSelectedSpeechStyle] = useState<"sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo">("sp_quebrada");
   const [isTransformingText, setIsTransformingText] = useState(false);
-  const [liveAutoTransform, setLiveAutoTransform] = useState<boolean>(true);
-  const [liveAdaptedPreview, setLiveAdaptedPreview] = useState<string>("");
   const activeTransformAbortRef = useRef<AbortController | null>(null);
-  const transformDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const [lexiconDomain, setLexiconDomain] = useState<"girias_sp" | "tecnico_profissional" | "transformacoes" | "dialogos">("girias_sp");
   const [lexiconCategory, setLexiconCategory] = useState<string>("todos");
   const [lexiconSearch, setLexiconSearch] = useState("");
   const [copiedTermId, setCopiedTermId] = useState<string | null>(null);
 
-  // Mapeamento de estilo para mood do motor com AUTO-TRANSFORMAÇÃO IMEDIATA (inclusive re-clique)
+  // Mapeamento de estilo para mood do motor e transformação sob demanda ao clicar no botão
   const handleSelectSpeechStyle = async (style: "sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo") => {
     setSelectedSpeechStyle(style);
     if (style === "sp_quebrada") setDispatchMood("sp");
@@ -298,18 +295,18 @@ export default function VnTtsStudio() {
     else if (style === "persuasao") setDispatchMood("empolgado");
     else if (style === "afetivo") setDispatchMood("calmo");
 
-    // Força auto-transformação imediata e aplica direto no texto do roteiro
+    // Transforma a mensagem apenas ao apertar o botão
     const baseText = originalUserText.trim() || dispatchText.trim();
     if (baseText) {
       if (!originalUserText.trim()) {
         setOriginalUserText(baseText);
       }
-      await handleTransformDispatchText(style, baseText, true);
+      await handleTransformDispatchText(style, baseText);
     }
   };
 
-  // Transformar texto para o estilo selecionado (com cancelamento de requisições anteriores)
-  const handleTransformDispatchText = async (targetStyle?: string, baseOverride?: string, applyDirectly: boolean = true) => {
+  // Transformar texto para o estilo selecionado usando interpretação e raciocínio contextual da IA
+  const handleTransformDispatchText = async (targetStyle?: string, baseOverride?: string) => {
     const styleToUse = targetStyle || selectedSpeechStyle;
     const currentText = (baseOverride || originalUserText.trim() || dispatchText.trim());
     if (!currentText) return;
@@ -334,10 +331,7 @@ export default function VnTtsStudio() {
       });
       const data = await res.json();
       if (data.ok && data.adapted) {
-        setLiveAdaptedPreview(data.adapted);
-        if (applyDirectly) {
-          handleDispatchTextChange(data.adapted);
-        }
+        handleDispatchTextChange(data.adapted);
       }
     } catch (e: any) {
       if (e.name !== "AbortError") {
@@ -348,36 +342,10 @@ export default function VnTtsStudio() {
     }
   };
 
-  // Monitor em Tempo Real (Debounced): Atualiza a prévia ao vivo em tempo real enquanto digita
-  useEffect(() => {
-    if (!liveAutoTransform) return;
-    const textToAdapt = originalUserText.trim();
-    if (!textToAdapt || textToAdapt.length < 3) {
-      setLiveAdaptedPreview("");
-      return;
-    }
-
-    if (transformDebounceRef.current) {
-      clearTimeout(transformDebounceRef.current);
-    }
-
-    transformDebounceRef.current = setTimeout(() => {
-      // Atualiza a prévia ao vivo em tempo real sem roubar o foco do cursor
-      handleTransformDispatchText(selectedSpeechStyle, textToAdapt, false);
-    }, 350);
-
-    return () => {
-      if (transformDebounceRef.current) {
-        clearTimeout(transformDebounceRef.current);
-      }
-    };
-  }, [originalUserText, selectedSpeechStyle, liveAutoTransform]);
-
   // Reverter texto adaptado para o que o usuário escreveu originalmente
   const handleRevertToOriginal = () => {
     if (originalUserText) {
       handleDispatchTextChange(originalUserText);
-      setLiveAdaptedPreview("");
     }
   };
 
@@ -2164,35 +2132,28 @@ export default function VnTtsStudio() {
                       type="button"
                       onClick={() => handleTransformDispatchText()}
                       disabled={isTransformingText || !dispatchText.trim()}
-                      className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-amber-600/20 hover:from-amber-500/30 hover:to-amber-600/30 border border-amber-500/40 text-amber-300 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer disabled:opacity-40"
+                      className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/25 to-amber-600/25 hover:from-amber-500/35 hover:to-amber-600/35 border border-amber-500/40 text-amber-300 text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer disabled:opacity-40 shadow-sm"
                     >
                       {isTransformingText ? (
                         <>
                           <RefreshCw size={12} className="animate-spin text-amber-400" />
-                          <span>Adaptando em tempo real...</span>
+                          <span>Interpretando e Transformando com IA...</span>
                         </>
                       ) : (
                         <>
                           <Sparkles size={12} className="text-amber-400" />
-                          <span>Transformar Agora</span>
+                          <span>
+                            Transformar para {
+                              selectedSpeechStyle === "sp_quebrada" ? "Gírias SP" :
+                              selectedSpeechStyle === "executivo" ? "Executivo" :
+                              selectedSpeechStyle === "tecnico_juridico" ? "Culto / Técnico" :
+                              selectedSpeechStyle === "persuasao" ? "Persuasão" : "Afetivo"
+                            }
+                          </span>
                         </>
                       )}
                     </button>
 
-                    {/* Toggle Modo Tempo Real */}
-                    <button
-                      type="button"
-                      onClick={() => setLiveAutoTransform(!liveAutoTransform)}
-                      className={`px-2.5 py-1.5 rounded-xl border text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer ${
-                        liveAutoTransform
-                          ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
-                          : "bg-zinc-800 border-white/10 text-zinc-400 hover:text-white"
-                      }`}
-                      title={liveAutoTransform ? "Transformação em tempo real ao digitar (Ativada)" : "Modo manual (Clique para ativar tempo real)"}
-                    >
-                      <Zap size={11} className={liveAutoTransform ? "text-emerald-400" : "text-zinc-500"} />
-                      <span>{liveAutoTransform ? "Tempo Real: ON" : "Tempo Real: OFF"}</span>
-                    </button>
 
                     {/* Botão de Reverter para o Texto Original Digitado */}
                     {originalUserText && originalUserText.trim() !== dispatchText.trim() && (
@@ -2212,7 +2173,6 @@ export default function VnTtsStudio() {
                         type="button"
                         onClick={() => {
                           setOriginalUserText("");
-                          setLiveAdaptedPreview("");
                           handleDispatchTextChange("");
                         }}
                         className="text-[11px] text-zinc-500 hover:text-zinc-300 px-2 py-1 transition cursor-pointer"
@@ -2227,39 +2187,13 @@ export default function VnTtsStudio() {
                   </span>
                 </div>
 
-                {/* Card de Transformação em Tempo Real (Live Preview enquanto digita) */}
-                {liveAdaptedPreview && liveAdaptedPreview !== dispatchText && (
-                  <div className="p-3.5 rounded-2xl bg-zinc-900/90 border border-amber-500/30 text-xs space-y-2 animate-in fade-in duration-150 shadow-lg shadow-black/40">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-1.5 text-amber-300 font-semibold text-[11px]">
-                        <Sparkles size={13} className="text-amber-400 animate-pulse" />
-                        <span>Versão Adaptada em Tempo Real ({
-                          selectedSpeechStyle === "sp_quebrada" ? "Gírias SP" :
-                          selectedSpeechStyle === "executivo" ? "Executivo" :
-                          selectedSpeechStyle === "tecnico_juridico" ? "Culto / Técnico" :
-                          selectedSpeechStyle === "persuasao" ? "Persuasão" : "Afetivo"
-                        }):</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDispatchTextChange(liveAdaptedPreview)}
-                        className="px-2.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-semibold text-[10px] transition cursor-pointer shadow-md"
-                      >
-                        Substituir Roteiro
-                      </button>
-                    </div>
-                    <p className="text-xs text-white leading-relaxed font-normal bg-black/40 p-2.5 rounded-xl border border-white/[0.04]">
-                      "{liveAdaptedPreview}"
-                    </p>
-                  </div>
-                )}
 
                 {/* Feedback de Texto Original vs Adaptado */}
                 {originalUserText && originalUserText.trim() !== dispatchText.trim() && (
                   <div className="p-3 rounded-2xl bg-zinc-900/60 border border-white/[0.06] text-xs space-y-1.5 animate-in fade-in duration-150">
                     <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono">
                       <span>Texto Original com suas palavras:</span>
-                      <span className="text-amber-400 font-semibold">Adaptado para {
+                      <span className="text-amber-400 font-semibold">Interpretado & Adaptado para {
                         selectedSpeechStyle === "sp_quebrada" ? "Gírias SP" :
                         selectedSpeechStyle === "executivo" ? "Executivo" :
                         selectedSpeechStyle === "tecnico_juridico" ? "Culto / Técnico" :
