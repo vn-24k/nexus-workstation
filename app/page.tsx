@@ -298,18 +298,18 @@ export default function VnTtsStudio() {
     else if (style === "persuasao") setDispatchMood("empolgado");
     else if (style === "afetivo") setDispatchMood("calmo");
 
-    // Força auto-transformação imediata do texto atual com as palavras do usuário
+    // Força auto-transformação imediata e aplica direto no texto do roteiro
     const baseText = originalUserText.trim() || dispatchText.trim();
     if (baseText) {
       if (!originalUserText.trim()) {
         setOriginalUserText(baseText);
       }
-      await handleTransformDispatchText(style, baseText);
+      await handleTransformDispatchText(style, baseText, true);
     }
   };
 
   // Transformar texto para o estilo selecionado (com cancelamento de requisições anteriores)
-  const handleTransformDispatchText = async (targetStyle?: string, baseOverride?: string) => {
+  const handleTransformDispatchText = async (targetStyle?: string, baseOverride?: string, applyDirectly: boolean = true) => {
     const styleToUse = targetStyle || selectedSpeechStyle;
     const currentText = (baseOverride || originalUserText.trim() || dispatchText.trim());
     if (!currentText) return;
@@ -334,8 +334,10 @@ export default function VnTtsStudio() {
       });
       const data = await res.json();
       if (data.ok && data.adapted) {
-        handleDispatchTextChange(data.adapted);
         setLiveAdaptedPreview(data.adapted);
+        if (applyDirectly) {
+          handleDispatchTextChange(data.adapted);
+        }
       }
     } catch (e: any) {
       if (e.name !== "AbortError") {
@@ -346,7 +348,7 @@ export default function VnTtsStudio() {
     }
   };
 
-  // Monitor em Tempo Real (Debounced): Transforma o texto automaticamente conforme o usuário digita
+  // Monitor em Tempo Real (Debounced): Atualiza a prévia ao vivo em tempo real enquanto digita
   useEffect(() => {
     if (!liveAutoTransform) return;
     const textToAdapt = originalUserText.trim();
@@ -360,8 +362,9 @@ export default function VnTtsStudio() {
     }
 
     transformDebounceRef.current = setTimeout(() => {
-      handleTransformDispatchText(selectedSpeechStyle, textToAdapt);
-    }, 450);
+      // Atualiza a prévia ao vivo em tempo real sem roubar o foco do cursor
+      handleTransformDispatchText(selectedSpeechStyle, textToAdapt, false);
+    }, 350);
 
     return () => {
       if (transformDebounceRef.current) {
@@ -2224,7 +2227,34 @@ export default function VnTtsStudio() {
                   </span>
                 </div>
 
-                {/* Feedback Card de Transformação em Tempo Real */}
+                {/* Card de Transformação em Tempo Real (Live Preview enquanto digita) */}
+                {liveAdaptedPreview && liveAdaptedPreview !== dispatchText && (
+                  <div className="p-3.5 rounded-2xl bg-zinc-900/90 border border-amber-500/30 text-xs space-y-2 animate-in fade-in duration-150 shadow-lg shadow-black/40">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-1.5 text-amber-300 font-semibold text-[11px]">
+                        <Sparkles size={13} className="text-amber-400 animate-pulse" />
+                        <span>Versão Adaptada em Tempo Real ({
+                          selectedSpeechStyle === "sp_quebrada" ? "Gírias SP" :
+                          selectedSpeechStyle === "executivo" ? "Executivo" :
+                          selectedSpeechStyle === "tecnico_juridico" ? "Culto / Técnico" :
+                          selectedSpeechStyle === "persuasao" ? "Persuasão" : "Afetivo"
+                        }):</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDispatchTextChange(liveAdaptedPreview)}
+                        className="px-2.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-semibold text-[10px] transition cursor-pointer shadow-md"
+                      >
+                        Substituir Roteiro
+                      </button>
+                    </div>
+                    <p className="text-xs text-white leading-relaxed font-normal bg-black/40 p-2.5 rounded-xl border border-white/[0.04]">
+                      "{liveAdaptedPreview}"
+                    </p>
+                  </div>
+                )}
+
+                {/* Feedback de Texto Original vs Adaptado */}
                 {originalUserText && originalUserText.trim() !== dispatchText.trim() && (
                   <div className="p-3 rounded-2xl bg-zinc-900/60 border border-white/[0.06] text-xs space-y-1.5 animate-in fade-in duration-150">
                     <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono">
