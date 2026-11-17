@@ -342,6 +342,46 @@ export default function VnTtsStudio() {
     }
   };
 
+  // Refazer o texto com outras palavras mantendo exatamente o mesmo sentido e coerência
+  const handleRephraseVariation = async () => {
+    const currentText = dispatchText.trim() || originalUserText.trim();
+    if (!currentText || isTransformingText) return;
+
+    if (!originalUserText.trim()) {
+      setOriginalUserText(currentText);
+    }
+
+    if (activeTransformAbortRef.current) {
+      activeTransformAbortRef.current.abort();
+    }
+    const abortCtrl = new AbortController();
+    activeTransformAbortRef.current = abortCtrl;
+
+    setIsTransformingText(true);
+    try {
+      const res = await fetch("/api/lexicon/transform", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: currentText,
+          style: selectedSpeechStyle,
+          variation: true,
+        }),
+        signal: abortCtrl.signal,
+      });
+      const data = await res.json();
+      if (data.ok && data.adapted) {
+        handleDispatchTextChange(data.adapted);
+      }
+    } catch (e: any) {
+      if (e.name !== "AbortError") {
+        console.error("Erro ao gerar variação do texto:", e);
+      }
+    } finally {
+      setIsTransformingText(false);
+    }
+  };
+
   // Reverter texto adaptado para o que o usuário escreveu originalmente
   const handleRevertToOriginal = () => {
     if (originalUserText) {
@@ -465,9 +505,7 @@ export default function VnTtsStudio() {
 
   // Sync to LocalStorage
   useEffect(() => {
-    if (messages.length > 0) {
-      localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(messages));
-    }
+    localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(messages));
   }, [messages]);
 
   useEffect(() => {
@@ -546,6 +584,37 @@ export default function VnTtsStudio() {
       console.error(err);
     } finally {
       setIsReplying(false);
+    }
+  };
+
+  // Limpar todo o histórico de conversas do assistente
+  const handleClearChatHistory = async () => {
+    const welcomeMsg: Message = {
+      id: `msg_init_${Date.now()}`,
+      role: "assistant",
+      content: "Histórico de conversas reiniciado com sucesso. Como posso ajudar você agora com estratégias, códigos, minutas ou roteiros?",
+      createdAt: new Date().toISOString(),
+    };
+    setMessages([welcomeMsg]);
+    localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify([welcomeMsg]));
+    try {
+      await fetch("/api/bot", { method: "DELETE" });
+    } catch (e) {
+      console.error("Erro ao limpar histórico no servidor:", e);
+    }
+  };
+
+  // Excluir mensagem individual do histórico
+  const handleDeleteChatMessage = async (msgId: string) => {
+    setMessages((prev) => {
+      const updated = prev.filter((m) => m.id !== msgId);
+      localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await fetch(`/api/bot?id=${encodeURIComponent(msgId)}`, { method: "DELETE" });
+    } catch (e) {
+      console.error("Erro ao excluir mensagem no servidor:", e);
     }
   };
 
@@ -2154,6 +2223,18 @@ export default function VnTtsStudio() {
                       )}
                     </button>
 
+                    {/* Botão de Refazer com Outras Palavras (Mesmo Sentido & Coerência) */}
+                    <button
+                      type="button"
+                      onClick={() => handleRephraseVariation()}
+                      disabled={isTransformingText || !dispatchText.trim()}
+                      className="px-3 py-1.5 rounded-xl bg-zinc-850 hover:bg-zinc-800 border border-white/10 text-xs font-medium text-zinc-300 hover:text-white flex items-center space-x-1.5 transition cursor-pointer disabled:opacity-40"
+                      title="Refazer a frase com outras palavras mantendo exatamente o mesmo sentido e coerência"
+                    >
+                      <RefreshCw size={12} className={isTransformingText ? "animate-spin text-amber-400" : "text-amber-400/90"} />
+                      <span>Refazer com outras palavras</span>
+                    </button>
+
 
                     {/* Botão de Reverter para o Texto Original Digitado */}
                     {originalUserText && originalUserText.trim() !== dispatchText.trim() && (
@@ -2503,8 +2584,43 @@ export default function VnTtsStudio() {
 
         {/* TAB 2: ASSISTENTE CONVERSACIONAL */}
         {currentTab === "assistant" && (
-          <div className="flex flex-col flex-1 max-w-3xl mx-auto w-full space-y-6">
-            <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+          <div className="flex flex-col flex-1 max-w-3xl mx-auto w-full space-y-5">
+            {/* Barra de Status e Gerenciamento do Histórico */}
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-zinc-900/70 border border-white/[0.08] backdrop-blur-md shadow-lg shadow-black/30">
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500/20 via-blue-500/20 to-purple-500/20 border border-amber-400/30 flex items-center justify-center text-amber-300">
+                  <Sparkles size={15} />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-semibold text-white tracking-tight">Assistente Neural VN</span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono">
+                      Gemini 3.5 Flash • Raciocínio Ativo
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-zinc-400 font-mono">
+                    {messages.length} {messages.length === 1 ? "mensagem registrada" : "mensagens no histórico"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                {messages.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearChatHistory}
+                    className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-300 hover:text-red-200 text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer"
+                    title="Excluir todo o histórico desta conversa"
+                  >
+                    <Trash2 size={12} className="text-red-400" />
+                    <span>Excluir Histórico</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Sugestões Rápidas de Prompt */}
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-0.5">
               {[
                 "Elabore uma proposta de consultoria sênior",
                 "Explique a física de som e ressonância acústica",
@@ -2513,73 +2629,98 @@ export default function VnTtsStudio() {
                 <button
                   key={i}
                   onClick={() => handleSendMessage(undefined, suggestion)}
-                  className="px-3 py-1.5 rounded-full bg-zinc-900/60 hover:bg-zinc-800 border border-white/[0.06] text-[11px] text-zinc-400 hover:text-white transition"
+                  className="px-3 py-1.5 rounded-full bg-zinc-900/60 hover:bg-zinc-800 border border-white/[0.06] text-[11px] text-zinc-400 hover:text-white transition cursor-pointer"
                 >
                   {suggestion}
                 </button>
               ))}
             </div>
 
-            <div className="flex-1 space-y-6 overflow-y-auto py-4 min-h-[420px] max-h-[580px] pr-1">
+            <div className="flex-1 space-y-4 overflow-y-auto py-2 min-h-[420px] max-h-[580px] pr-1">
               {messages.map((msg) => (
                 <div
                   key={msg.id}
-                  className={`flex flex-col ${
+                  className={`group flex flex-col ${
                     msg.role === "user" ? "items-end" : "items-start"
                   }`}
                 >
                   <div
-                    className={`max-w-[88%] rounded-2xl px-5 py-3.5 text-xs leading-relaxed ${
+                    className={`relative max-w-[88%] rounded-2xl px-5 py-3.5 text-xs leading-relaxed ${
                       msg.role === "user"
                         ? "bg-[#2c2c2e] text-white font-normal"
                         : "apple-glass text-zinc-200"
                     }`}
                   >
+                    {/* Botão de Excluir Mensagem Individual do Usuário */}
+                    {msg.role === "user" && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteChatMessage(msg.id)}
+                        className="absolute -left-7 top-3 opacity-0 group-hover:opacity-100 p-1 text-zinc-500 hover:text-red-400 transition cursor-pointer"
+                        title="Excluir esta mensagem"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+
                     <div className="whitespace-pre-wrap">{msg.content}</div>
 
                     {msg.role === "assistant" && (
-                      <div className="mt-3 pt-2.5 border-t border-white/[0.06] flex items-center space-x-3 text-[11px]">
-                        <button
-                          onClick={() => handlePlayVoice(msg.id, msg.content)}
-                          disabled={loadingAudioId === msg.id}
-                          className="flex items-center space-x-1.5 text-zinc-400 hover:text-white transition"
-                        >
-                          <Volume2 size={13} />
-                          <span>
-                            {loadingAudioId === msg.id
-                              ? "Gerando voz..."
-                              : playingMessageId === msg.id
-                              ? "Pausar"
-                              : "Ouvir com Minha Voz"}
-                          </span>
-                        </button>
+                      <div className="mt-3 pt-2.5 border-t border-white/[0.06] flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            onClick={() => handlePlayVoice(msg.id, msg.content)}
+                            disabled={loadingAudioId === msg.id}
+                            className="flex items-center space-x-1.5 text-zinc-400 hover:text-white transition cursor-pointer"
+                          >
+                            <Volume2 size={13} />
+                            <span>
+                              {loadingAudioId === msg.id
+                                ? "Gerando voz..."
+                                : playingMessageId === msg.id
+                                ? "Pausar"
+                                : "Ouvir com Minha Voz"}
+                            </span>
+                          </button>
 
-                        <button
-                          onClick={() => handleSaveAssistantAudioToRecords(msg.id, msg.content)}
-                          className="flex items-center space-x-1.5 text-zinc-400 hover:text-white transition"
-                        >
-                          {savedSuccessId === msg.id ? (
-                            <>
-                              <Check size={13} className="text-emerald-400" />
-                              <span className="text-emerald-400">Salvo no Acervo</span>
-                            </>
-                          ) : (
-                            <>
-                              <BookmarkPlus size={13} />
-                              <span>Salvar</span>
-                            </>
-                          )}
-                        </button>
+                          <button
+                            onClick={() => handleSaveAssistantAudioToRecords(msg.id, msg.content)}
+                            className="flex items-center space-x-1.5 text-zinc-400 hover:text-white transition cursor-pointer"
+                          >
+                            {savedSuccessId === msg.id ? (
+                              <>
+                                <Check size={13} className="text-emerald-400" />
+                                <span className="text-emerald-400">Salvo no Acervo</span>
+                              </>
+                            ) : (
+                              <>
+                                <BookmarkPlus size={13} />
+                                <span>Salvar</span>
+                              </>
+                            )}
+                          </button>
 
+                          <button
+                            onClick={() => {
+                              handleDispatchTextChange(msg.content);
+                              setCurrentTab("dispatch");
+                            }}
+                            className="flex items-center space-x-1.5 text-emerald-400/90 hover:text-emerald-300 transition cursor-pointer"
+                          >
+                            <MessageCircle size={13} />
+                            <span>Disparar WhatsApp</span>
+                          </button>
+                        </div>
+
+                        {/* Botão de Excluir Mensagem do Assistente */}
                         <button
-                          onClick={() => {
-                            handleDispatchTextChange(msg.content);
-                            setCurrentTab("dispatch");
-                          }}
-                          className="flex items-center space-x-1.5 text-emerald-400/90 hover:text-emerald-300 transition"
+                          type="button"
+                          onClick={() => handleDeleteChatMessage(msg.id)}
+                          className="flex items-center space-x-1 text-zinc-500 hover:text-red-400 transition cursor-pointer"
+                          title="Excluir esta resposta do histórico"
                         >
-                          <MessageCircle size={13} />
-                          <span>Disparar WhatsApp</span>
+                          <Trash2 size={11} />
+                          <span className="text-[10px]">Excluir</span>
                         </button>
                       </div>
                     )}

@@ -204,6 +204,15 @@ export const db = {
     return msg;
   },
 
+  deleteMessage: (id: string): boolean => {
+    if (!global.__nexus_db) global.__nexus_db = loadFromDisk();
+    const initialLen = global.__nexus_db.messages.length;
+    global.__nexus_db.messages = global.__nexus_db.messages.filter((m) => m.id !== id);
+    const deleted = global.__nexus_db.messages.length < initialLen;
+    if (deleted) saveToDisk(global.__nexus_db);
+    return deleted;
+  },
+
   clearMessages: () => {
     if (!global.__nexus_db) global.__nexus_db = loadFromDisk();
     global.__nexus_db.messages = [

@@ -266,7 +266,7 @@ function smartTransformWithPlaceholders(text: string, styleKey: string): string 
 
 export async function POST(req: NextRequest) {
   try {
-    const { text, style = "sp_quebrada" } = await req.json();
+    const { text, style = "sp_quebrada", variation = false } = await req.json();
 
     if (!text || typeof text !== "string" || !text.trim()) {
       return NextResponse.json({ ok: false, error: "Texto obrigatório para transformação." }, { status: 400 });
@@ -329,15 +329,19 @@ Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem expl
         const systemPrompt = STYLE_REASONING_PROMPTS[styleKey] || STYLE_REASONING_PROMPTS.sp_quebrada;
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GOOGLE_API_KEY}`;
 
+        const promptText = variation
+          ? `${systemPrompt}\n\nIMPORTANTE (REFAZER COM OUTRAS PALAVRAS): Crie uma NOVA VARIAÇÃO desta mensagem utilizando palavras alternativas e uma estrutura oracional diferente, mas com rigorosamente o mesmo sentido, coerência e estilo (${styleKey}). Não repita a construção anterior.\n\nMensagem base:\n"${cleanInput}"`
+          : `${systemPrompt}\n\nMensagem original para raciocinar e reescrever:\n"${cleanInput}"`;
+
         const gResp = await fetch(geminiUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{
-              parts: [{ text: `${systemPrompt}\n\nMensagem original para raciocinar e reescrever:\n"${cleanInput}"` }],
+              parts: [{ text: promptText }],
             }],
             generationConfig: {
-              temperature: 0.7,
+              temperature: variation ? 0.88 : 0.7,
               maxOutputTokens: 600,
             },
           }),
@@ -356,6 +360,7 @@ Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem expl
               style: styleKey,
               engine: "gemini-3.5-flash-lite",
               model: "gemini-3.5-flash-lite",
+              variation: Boolean(variation),
             });
           }
         }
