@@ -36,7 +36,7 @@ function getBridgeUrl(custom?: string): string {
     }
   } catch (e) {}
 
-  return (process.env.WHATSAPP_BRIDGE_URL || "https://ballot-consultation-warrior-owns.trycloudflare.com").replace(/\/$/, "");
+  return (process.env.WHATSAPP_BRIDGE_URL || "https://always-chairs-evaluated-flyer.trycloudflare.com").replace(/\/$/, "");
 }
 
 export async function POST(req: NextRequest) {

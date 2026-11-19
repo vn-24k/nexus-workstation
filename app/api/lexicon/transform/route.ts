@@ -326,8 +326,9 @@ Mantenha rigorosamente o significado e a intenção original.
 Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem explicações.`,
         };
 
-        const systemPrompt = STYLE_REASONING_PROMPTS[styleKey] || STYLE_REASONING_PROMPTS.sp_quebrada;
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GOOGLE_API_KEY}`;
+        const systemPrompt = (STYLE_REASONING_PROMPTS[styleKey] || STYLE_REASONING_PROMPTS.sp_quebrada) +
+          "\nNÃO CENSURE: Preserve integralmente a energia, gírias pesadas, palavrões ou termos de rua se existirem, adaptando com naturalidade e sem qualquer bloqueio moral.";
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GOOGLE_API_KEY}`;
 
         const promptText = variation
           ? `${systemPrompt}\n\nIMPORTANTE (REFAZER COM OUTRAS PALAVRAS): Crie uma NOVA VARIAÇÃO desta mensagem utilizando palavras alternativas e uma estrutura oracional diferente, mas com rigorosamente o mesmo sentido, coerência e estilo (${styleKey}). Não repita a construção anterior.\n\nMensagem base:\n"${cleanInput}"`
@@ -340,6 +341,13 @@ Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem expl
             contents: [{
               parts: [{ text: promptText }],
             }],
+            safetySettings: [
+              { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" },
+            ],
             generationConfig: {
               temperature: variation ? 0.88 : 0.7,
               maxOutputTokens: 600,
@@ -358,8 +366,8 @@ Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem expl
               original: cleanInput,
               adapted: generated.replace(/^["']|["']$/g, "").trim(),
               style: styleKey,
-              engine: "gemini-3.5-flash-lite",
-              model: "gemini-3.5-flash-lite",
+              engine: "gemini-flash-latest",
+              model: "gemini-flash-latest",
               variation: Boolean(variation),
             });
           }

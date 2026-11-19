@@ -278,8 +278,8 @@ export default function VnTtsStudio() {
   const [generatedAudioCustomTitle, setGeneratedAudioCustomTitle] = useState("");
   const [generatedAudioTargetFolder, setGeneratedAudioTargetFolder] = useState("vozes-geradas");
 
-  // Lexicon & Speech Styles (Dicionário de Gírias SP + Biblioteca Técnica/Profissional)
-  const [selectedSpeechStyle, setSelectedSpeechStyle] = useState<"sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo">("sp_quebrada");
+  // Lexicon & Speech Styles (Dicionário de Gírias SP + Biblioteca Técnica/Profissional + Modo Texto Exato)
+  const [selectedSpeechStyle, setSelectedSpeechStyle] = useState<"exato" | "sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo">("exato");
   const [isTransformingText, setIsTransformingText] = useState(false);
   const activeTransformAbortRef = useRef<AbortController | null>(null);
   const [lexiconDomain, setLexiconDomain] = useState<"girias_sp" | "tecnico_profissional" | "transformacoes" | "dialogos">("girias_sp");
@@ -288,14 +288,25 @@ export default function VnTtsStudio() {
   const [copiedTermId, setCopiedTermId] = useState<string | null>(null);
 
   // Mapeamento de estilo para mood do motor e transformação sob demanda ao clicar no botão
-  const handleSelectSpeechStyle = async (style: "sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo") => {
+  const handleSelectSpeechStyle = async (style: "exato" | "sp_quebrada" | "executivo" | "tecnico_juridico" | "persuasao" | "afetivo") => {
     setSelectedSpeechStyle(style);
+    if (style === "exato") {
+      setDispatchMood("sp");
+      if (activeTransformAbortRef.current) {
+        activeTransformAbortRef.current.abort();
+      }
+      setIsTransformingText(false);
+      if (originalUserText) {
+        handleDispatchTextChange(originalUserText);
+      }
+      return;
+    }
     if (style === "sp_quebrada") setDispatchMood("sp");
     else if (style === "executivo" || style === "tecnico_juridico") setDispatchMood("firme");
     else if (style === "persuasao") setDispatchMood("empolgado");
     else if (style === "afetivo") setDispatchMood("calmo");
 
-    // Transforma a mensagem apenas ao apertar o botão
+    // Transforma a mensagem apenas ao apertar o botão se não for exato
     const baseText = originalUserText.trim() || dispatchText.trim();
     if (baseText) {
       if (!originalUserText.trim()) {
@@ -308,6 +319,7 @@ export default function VnTtsStudio() {
   // Transformar texto para o estilo selecionado usando interpretação e raciocínio contextual da IA
   const handleTransformDispatchText = async (targetStyle?: string, baseOverride?: string) => {
     const styleToUse = targetStyle || selectedSpeechStyle;
+    if (styleToUse === "exato") return;
     const currentText = (baseOverride || originalUserText.trim() || dispatchText.trim());
     if (!currentText) return;
 
@@ -345,7 +357,7 @@ export default function VnTtsStudio() {
   // Refazer o texto com outras palavras mantendo exatamente o mesmo sentido e coerência
   const handleRephraseVariation = async () => {
     const currentText = dispatchText.trim() || originalUserText.trim();
-    if (!currentText || isTransformingText) return;
+    if (!currentText || isTransformingText || selectedSpeechStyle === "exato") return;
 
     if (!originalUserText.trim()) {
       setOriginalUserText(currentText);
@@ -2142,37 +2154,83 @@ export default function VnTtsStudio() {
                 </button>
               </div>
 
-              {/* Seletor de Estilos de Fala (5 Modos Vocais) */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 pt-0.5">
-                {[
-                  { id: "sp_quebrada", label: "Gírias SP", desc: "Malandragem & Rua", icon: Zap, activeClass: "bg-amber-500/20 border-amber-400/70 text-amber-300 shadow-lg shadow-amber-950/40" },
-                  { id: "executivo", label: "Executivo", desc: "Diretoria & Alinhamento", icon: Briefcase, activeClass: "bg-blue-500/20 border-blue-400/70 text-blue-300 shadow-lg shadow-blue-950/40" },
-                  { id: "tecnico_juridico", label: "Culto & Técnico", desc: "Jurídico & Analítico", icon: Scale, activeClass: "bg-purple-500/20 border-purple-400/70 text-purple-300 shadow-lg shadow-purple-950/40" },
-                  { id: "persuasao", label: "Persuasão", desc: "Vendas & Impacto", icon: Target, activeClass: "bg-emerald-500/20 border-emerald-400/70 text-emerald-300 shadow-lg shadow-emerald-950/40" },
-                  { id: "afetivo", label: "Afetivo", desc: "Carinho & Família", icon: Heart, activeClass: "bg-rose-500/20 border-rose-400/70 text-rose-300 shadow-lg shadow-rose-950/40" },
-                ].map((style) => {
-                  const Icon = style.icon;
-                  const isSelected = selectedSpeechStyle === style.id;
-                  return (
-                    <button
-                      key={style.id}
-                      type="button"
-                      onClick={() => handleSelectSpeechStyle(style.id as any)}
-                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
-                        isSelected
-                          ? style.activeClass
-                          : "bg-zinc-900/50 border-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
-                      }`}
-                    >
-                      <div className="flex items-center space-x-1.5">
-                        <Icon size={12} className={isSelected ? "" : "text-zinc-500"} />
-                        <span className="text-[11px] truncate font-semibold">{style.label}</span>
-                      </div>
-                      <span className="text-[9px] text-zinc-500 truncate mt-1">{style.desc}</span>
-                    </button>
-                  );
-                })}
+              {/* Seletor Principal de Modo: Repetir Exatamente vs Adaptar com Estilos de IA */}
+              <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-2xl bg-zinc-950/70 border border-white/[0.08]">
+                <button
+                  type="button"
+                  onClick={() => handleSelectSpeechStyle("exato")}
+                  className={`flex-1 min-w-[220px] py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center space-x-2 transition cursor-pointer ${
+                    selectedSpeechStyle === "exato"
+                      ? "bg-emerald-500/25 border border-emerald-400/80 text-emerald-300 shadow-md shadow-emerald-950/50"
+                      : "text-zinc-400 hover:text-white hover:bg-white/[0.04]"
+                  }`}
+                >
+                  <CheckCircle2 size={14} className={selectedSpeechStyle === "exato" ? "text-emerald-400" : "text-zinc-500"} />
+                  <span>Repetir Exatamente o que Digitar</span>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 uppercase tracking-wider font-bold">100% Fiel / Direto</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectSpeechStyle(selectedSpeechStyle === "exato" ? "sp_quebrada" : selectedSpeechStyle)}
+                  className={`flex-1 min-w-[220px] py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center space-x-2 transition cursor-pointer ${
+                    selectedSpeechStyle !== "exato"
+                      ? "bg-amber-500/25 border border-amber-400/80 text-amber-300 shadow-md shadow-amber-950/50"
+                      : "text-zinc-400 hover:text-white hover:bg-white/[0.04]"
+                  }`}
+                >
+                  <Sparkles size={14} className={selectedSpeechStyle !== "exato" ? "text-amber-400" : "text-zinc-500"} />
+                  <span>Adaptar Estilo com IA</span>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 uppercase tracking-wider font-bold">Gírias & Dialetos</span>
+                </button>
               </div>
+
+              {/* Seletor de Estilos de Fala (5 Modos Vocais + Banner de Texto Exato) */}
+              {selectedSpeechStyle === "exato" ? (
+                <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 flex items-start space-x-3 text-emerald-200 text-xs animate-in fade-in duration-150">
+                  <CheckCircle2 size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5 leading-relaxed">
+                    <div className="font-semibold text-emerald-300 flex items-center space-x-2">
+                      <span>Modo Texto Exato Ativo</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono">Verbatim / Direto</span>
+                    </div>
+                    <p className="text-[11px] text-zinc-300">
+                      Sua voz clonada falará <strong>exatamente cada palavra digitada abaixo</strong>, na ordem e grafia exatas. Nenhuma palavra será modificada, censurada ou reescrita pela IA. Palavrões, gírias ou desabafos são 100% permitidos e sintetizados.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 pt-0.5 animate-in fade-in duration-150">
+                  {[
+                    { id: "sp_quebrada", label: "Gírias SP", desc: "Malandragem & Rua", icon: Zap, activeClass: "bg-amber-500/20 border-amber-400/70 text-amber-300 shadow-lg shadow-amber-950/40" },
+                    { id: "executivo", label: "Executivo", desc: "Diretoria & Alinhamento", icon: Briefcase, activeClass: "bg-blue-500/20 border-blue-400/70 text-blue-300 shadow-lg shadow-blue-950/40" },
+                    { id: "tecnico_juridico", label: "Culto & Técnico", desc: "Jurídico & Analítico", icon: Scale, activeClass: "bg-purple-500/20 border-purple-400/70 text-purple-300 shadow-lg shadow-purple-950/40" },
+                    { id: "persuasao", label: "Persuasão", desc: "Vendas & Impacto", icon: Target, activeClass: "bg-emerald-500/20 border-emerald-400/70 text-emerald-300 shadow-lg shadow-emerald-950/40" },
+                    { id: "afetivo", label: "Afetivo", desc: "Carinho & Família", icon: Heart, activeClass: "bg-rose-500/20 border-rose-400/70 text-rose-300 shadow-lg shadow-rose-950/40" },
+                  ].map((style) => {
+                    const Icon = style.icon;
+                    const isSelected = selectedSpeechStyle === style.id;
+                    return (
+                      <button
+                        key={style.id}
+                        type="button"
+                        onClick={() => handleSelectSpeechStyle(style.id as any)}
+                        className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? style.activeClass
+                            : "bg-zinc-900/50 border-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+                        }`}
+                      >
+                        <div className="flex items-center space-x-1.5">
+                          <Icon size={12} className={isSelected ? "" : "text-zinc-500"} />
+                          <span className="text-[11px] truncate font-semibold">{style.label}</span>
+                        </div>
+                        <span className="text-[9px] text-zinc-500 truncate mt-1">{style.desc}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Textarea de Roteiro */}
               <div className="space-y-1.5">
@@ -2181,7 +2239,9 @@ export default function VnTtsStudio() {
                   value={dispatchText}
                   onChange={(e) => handleUserTypedText(e.target.value)}
                   placeholder={
-                    selectedSpeechStyle === "sp_quebrada"
+                    selectedSpeechStyle === "exato"
+                      ? "Digite exatamente o que você quer que sua voz fale... (O áudio reproduzirá cada palavra fielmente sem nenhuma modificação ou censura de IA)"
+                      : selectedSpeechStyle === "sp_quebrada"
                       ? "Escreva a mensagem com suas palavras ou digite livremente para adaptar com gírias de SP..."
                       : selectedSpeechStyle === "executivo"
                       ? "Digite a mensagem para receber a versão executiva com termos corporativos e alinhamento..."
@@ -2197,44 +2257,79 @@ export default function VnTtsStudio() {
                 {/* Barra de Ações do Roteiro */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
                   <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleTransformDispatchText()}
-                      disabled={isTransformingText || !dispatchText.trim()}
-                      className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/25 to-amber-600/25 hover:from-amber-500/35 hover:to-amber-600/35 border border-amber-500/40 text-amber-300 text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer disabled:opacity-40 shadow-sm"
-                    >
-                      {isTransformingText ? (
-                        <>
-                          <RefreshCw size={12} className="animate-spin text-amber-400" />
-                          <span>Interpretando e Transformando com IA...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles size={12} className="text-amber-400" />
-                          <span>
-                            Transformar para {
-                              selectedSpeechStyle === "sp_quebrada" ? "Gírias SP" :
-                              selectedSpeechStyle === "executivo" ? "Executivo" :
-                              selectedSpeechStyle === "tecnico_juridico" ? "Culto / Técnico" :
-                              selectedSpeechStyle === "persuasao" ? "Persuasão" : "Afetivo"
-                            }
-                          </span>
-                        </>
-                      )}
-                    </button>
+                    {selectedSpeechStyle === "exato" ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleSynthesizeDispatch}
+                          disabled={isSynthesizingDispatch || !dispatchText.trim()}
+                          className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500/25 to-emerald-600/25 hover:from-emerald-500/35 hover:to-emerald-600/35 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer disabled:opacity-40 shadow-sm"
+                        >
+                          {isSynthesizingDispatch ? (
+                            <>
+                              <RefreshCw size={12} className="animate-spin text-emerald-400" />
+                              <span>Sintetizando Voz Exata...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 size={12} className="text-emerald-400" />
+                              <span>Ouvir Minha Voz Falando Exatamente Isto</span>
+                            </>
+                          )}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleTransformDispatchText()}
+                          disabled={isTransformingText || !dispatchText.trim()}
+                          className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/25 to-amber-600/25 hover:from-amber-500/35 hover:to-amber-600/35 border border-amber-500/40 text-amber-300 text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer disabled:opacity-40 shadow-sm"
+                        >
+                          {isTransformingText ? (
+                            <>
+                              <RefreshCw size={12} className="animate-spin text-amber-400" />
+                              <span>Interpretando e Transformando com IA...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={12} className="text-amber-400" />
+                              <span>
+                                Transformar para {
+                                  selectedSpeechStyle === "sp_quebrada" ? "Gírias SP" :
+                                  selectedSpeechStyle === "executivo" ? "Executivo" :
+                                  selectedSpeechStyle === "tecnico_juridico" ? "Culto / Técnico" :
+                                  selectedSpeechStyle === "persuasao" ? "Persuasão" : "Afetivo"
+                                }
+                              </span>
+                            </>
+                          )}
+                        </button>
 
-                    {/* Botão de Refazer com Outras Palavras (Mesmo Sentido & Coerência) */}
-                    <button
-                      type="button"
-                      onClick={() => handleRephraseVariation()}
-                      disabled={isTransformingText || !dispatchText.trim()}
-                      className="px-3 py-1.5 rounded-xl bg-zinc-850 hover:bg-zinc-800 border border-white/10 text-xs font-medium text-zinc-300 hover:text-white flex items-center space-x-1.5 transition cursor-pointer disabled:opacity-40"
-                      title="Refazer a frase com outras palavras mantendo exatamente o mesmo sentido e coerência"
-                    >
-                      <RefreshCw size={12} className={isTransformingText ? "animate-spin text-amber-400" : "text-amber-400/90"} />
-                      <span>Refazer com outras palavras</span>
-                    </button>
+                        {/* Botão de Refazer com Outras Palavras (Mesmo Sentido & Coerência) */}
+                        <button
+                          type="button"
+                          onClick={() => handleRephraseVariation()}
+                          disabled={isTransformingText || !dispatchText.trim()}
+                          className="px-3 py-1.5 rounded-xl bg-zinc-850 hover:bg-zinc-800 border border-white/10 text-xs font-medium text-zinc-300 hover:text-white flex items-center space-x-1.5 transition cursor-pointer disabled:opacity-40"
+                          title="Refazer a frase com outras palavras mantendo exatamente o mesmo sentido e coerência"
+                        >
+                          <RefreshCw size={12} className={isTransformingText ? "animate-spin text-amber-400" : "text-amber-400/90"} />
+                          <span>Refazer com outras palavras</span>
+                        </button>
 
+                        {/* Botão de Mudar para Texto Exato Direto */}
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSpeechStyle("exato")}
+                          className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-xs text-emerald-300 hover:text-emerald-200 flex items-center space-x-1.5 transition cursor-pointer"
+                          title="Alternar para o modo exato que repete rigorosamente o que você digitou"
+                        >
+                          <Undo2 size={12} className="text-emerald-400" />
+                          <span>Falar Exatamente o que Digitei</span>
+                        </button>
+                      </>
+                    )}
 
                     {/* Botão de Reverter para o Texto Original Digitado */}
                     {originalUserText && originalUserText.trim() !== dispatchText.trim() && (
@@ -2288,18 +2383,28 @@ export default function VnTtsStudio() {
                 )}
               </div>
 
-              {/* Frases Prontas do Estilo Selecionado */}
+              {/* Frases Prontas ou Exemplos de Texto Exato */}
               <div className="space-y-1.5 pt-1">
                 <span className="text-[10px] font-medium text-zinc-400 block">
-                  Frases Prontas Recomendadas ({
-                    selectedSpeechStyle === "sp_quebrada" ? "São Paulo & Quebrada" :
-                    selectedSpeechStyle === "executivo" ? "Corporativo" :
-                    selectedSpeechStyle === "tecnico_juridico" ? "Culto / Analítico" :
-                    selectedSpeechStyle === "persuasao" ? "Persuasão" : "Familiar"
-                  }):
+                  {selectedSpeechStyle === "exato"
+                    ? "Frases Rápidas de Teste (Faladas Exatamente):"
+                    : `Frases Prontas Recomendadas (${
+                        selectedSpeechStyle === "sp_quebrada" ? "São Paulo & Quebrada" :
+                        selectedSpeechStyle === "executivo" ? "Corporativo" :
+                        selectedSpeechStyle === "tecnico_juridico" ? "Culto / Analítico" :
+                        selectedSpeechStyle === "persuasao" ? "Persuasão" : "Familiar"
+                      }):`}
                 </span>
                 <div className="flex flex-wrap gap-1.5">
-                  {(lexiconData.quickPresets.find((p) => p.id === selectedSpeechStyle)?.phrases || []).map((phrase, i) => (
+                  {(selectedSpeechStyle === "exato"
+                    ? [
+                        "Fala comigo, beleza? Passando pra te dar um salve.",
+                        "Tô na correria aqui agora, mais tarde eu te ligo com calma.",
+                        "Opa, fechado então, pode deixar que eu resolvo isso.",
+                        "E aí, tudo certo por aí? Dá um alô quando puder.",
+                      ]
+                    : (lexiconData.quickPresets.find((p) => p.id === selectedSpeechStyle)?.phrases || [])
+                  ).map((phrase, i) => (
                     <button
                       key={i}
                       type="button"
@@ -2312,34 +2417,36 @@ export default function VnTtsStudio() {
                 </div>
               </div>
 
-              {/* Termos & Gírias para Injetar no Roteiro */}
-              <div className="space-y-1.5 pt-0.5">
-                <span className="text-[10px] font-medium text-zinc-400 block">
-                  Clique para Injetar Termo na Fala:
-                </span>
-                <div className="flex flex-wrap gap-1">
-                  {(
-                    selectedSpeechStyle === "sp_quebrada"
-                      ? ["se liga na fita", "demorô", "pode pá", "sem neurose", "papo reto", "da hora", "proceder", "cria", "na correria", "suave"]
-                      : selectedSpeechStyle === "executivo"
-                      ? ["prezado", "alinhar diretrizes", "impreterivelmente", "subsidiar decisão", "prioritário", "oportunidade substancial"]
-                      : selectedSpeechStyle === "tecnico_juridico"
-                      ? ["inequívoco", "premissa fundamental", "corroborar", "discrepância", "ponderar", "contundente"]
-                      : selectedSpeechStyle === "persuasao"
-                      ? ["oportunidade incontestável", "retorno substancial", "momento ideal", "transformação contundente"]
-                      : ["meu bem", "um beijo no coração", "de coração", "te amo muito", "fica com Deus"]
-                  ).map((term, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => handleInsertToDispatch(term, "append")}
-                      className="px-2 py-0.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.06] text-[10px] text-zinc-400 hover:text-white transition cursor-pointer"
-                    >
-                      + {term}
-                    </button>
-                  ))}
+              {/* Termos & Gírias para Injetar no Roteiro (somente em modo adaptativo) */}
+              {selectedSpeechStyle !== "exato" && (
+                <div className="space-y-1.5 pt-0.5">
+                  <span className="text-[10px] font-medium text-zinc-400 block">
+                    Clique para Injetar Termo na Fala:
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {(
+                      selectedSpeechStyle === "sp_quebrada"
+                        ? ["se liga na fita", "demorô", "pode pá", "sem neurose", "papo reto", "da hora", "proceder", "cria", "na correria", "suave"]
+                        : selectedSpeechStyle === "executivo"
+                        ? ["prezado", "alinhar diretrizes", "impreterivelmente", "subsidiar decisão", "prioritário", "oportunidade substancial"]
+                        : selectedSpeechStyle === "tecnico_juridico"
+                        ? ["inequívoco", "premissa fundamental", "corroborar", "discrepância", "ponderar", "contundente"]
+                        : selectedSpeechStyle === "persuasao"
+                        ? ["oportunidade incontestável", "retorno substancial", "momento ideal", "transformação contundente"]
+                        : ["meu bem", "um beijo no coração", "de coração", "te amo muito", "fica com Deus"]
+                    ).map((term, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => handleInsertToDispatch(term, "append")}
+                        className="px-2 py-0.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.06] text-[10px] text-zinc-400 hover:text-white transition cursor-pointer"
+                      >
+                        + {term}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Action Buttons: Direct Dispatch with Safety Countdown & Preview */}
               <div className="space-y-2.5 pt-1">
@@ -2595,7 +2702,7 @@ export default function VnTtsStudio() {
                   <div className="flex items-center space-x-2">
                     <span className="text-xs font-semibold text-white tracking-tight">Assistente Neural VN</span>
                     <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono">
-                      Gemini 3.5 Flash • Raciocínio Ativo
+                      Modo Desbloqueado • Sem Censura • Responde Tudo
                     </span>
                   </div>
                   <span className="text-[10px] text-zinc-400 font-mono">
@@ -2623,8 +2730,9 @@ export default function VnTtsStudio() {
             <div className="flex flex-wrap items-center justify-center gap-2 pt-0.5">
               {[
                 "Elabore uma proposta de consultoria sênior",
+                "Crie um roteiro cru com gírias pesadas e palavrões",
+                "Dê um parecer direto sem filtros morais ou travas",
                 "Explique a física de som e ressonância acústica",
-                "Quais as melhores estratégias para marcas de luxo?",
               ].map((suggestion, i) => (
                 <button
                   key={i}
@@ -2703,12 +2811,13 @@ export default function VnTtsStudio() {
                           <button
                             onClick={() => {
                               handleDispatchTextChange(msg.content);
+                              handleSelectSpeechStyle("exato");
                               setCurrentTab("dispatch");
                             }}
                             className="flex items-center space-x-1.5 text-emerald-400/90 hover:text-emerald-300 transition cursor-pointer"
                           >
                             <MessageCircle size={13} />
-                            <span>Disparar WhatsApp</span>
+                            <span>Disparar WhatsApp (Texto Exato)</span>
                           </button>
                         </div>
 
