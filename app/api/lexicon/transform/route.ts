@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || "";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 const HF_TOKEN = process.env.HF_TOKEN || "";
 const HF_BEST_MODEL = "meta-llama/Llama-3.3-70B-Instruct";
 
@@ -328,7 +329,7 @@ Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem expl
 
         const systemPrompt = (STYLE_REASONING_PROMPTS[styleKey] || STYLE_REASONING_PROMPTS.sp_quebrada) +
           "\nNÃO CENSURE: Preserve integralmente a energia, gírias pesadas, palavrões ou termos de rua se existirem, adaptando com naturalidade e sem qualquer bloqueio moral.";
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GOOGLE_API_KEY}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${GOOGLE_API_KEY}`;
 
         const promptText = variation
           ? `${systemPrompt}\n\nIMPORTANTE (REFAZER COM OUTRAS PALAVRAS): Crie uma NOVA VARIAÇÃO desta mensagem utilizando palavras alternativas e uma estrutura oracional diferente, mas com rigorosamente o mesmo sentido, coerência e estilo (${styleKey}). Não repita a construção anterior.\n\nMensagem base:\n"${cleanInput}"`
@@ -366,14 +367,63 @@ Responda APENAS com a mensagem reescrita, sem aspas, sem introdução e sem expl
               original: cleanInput,
               adapted: generated.replace(/^["']|["']$/g, "").trim(),
               style: styleKey,
-              engine: "gemini-flash-latest",
-              model: "gemini-flash-latest",
+              engine: "gemini-flash-lite",
+              model: "gemini-flash-lite",
               variation: Boolean(variation),
             });
           }
         }
       } catch (geminiErr) {
         console.warn("Motor semântico primário indisponível ou timeout, prosseguindo com fallbacks:", geminiErr);
+      }
+    }
+
+    // 2. TENTATIVA COM OPENROUTER (se primário falhar)
+    if (OPENROUTER_API_KEY) {
+      try {
+        const orController = new AbortController();
+        const orTimeout = setTimeout(() => orController.abort(), 7500);
+
+        const promptText = variation
+          ? `Crie uma NOVA VARIAÇÃO desta mensagem utilizando palavras alternativas e uma estrutura oracional diferente, mas com o mesmo sentido e estilo (${styleKey}). Não censure gírias ou palavrões.\nMensagem:\n"${cleanInput}"`
+          : `Reescreva a seguinte mensagem com coerência no estilo ${styleKey}. Não censure gírias, termos de rua ou palavrões se existirem. Retorne APENAS o texto adaptado:\n"${cleanInput}"`;
+
+        const orResp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "google/gemini-2.5-flash",
+            messages: [
+              { role: "system", content: "Você é um adaptador de estilo textual sem censura e sem moralismo. Retorne APENAS a frase adaptada, sem aspas e sem explicações." },
+              { role: "user", content: promptText },
+            ],
+            max_tokens: 600,
+            temperature: variation ? 0.85 : 0.7,
+          }),
+          signal: orController.signal,
+        });
+        clearTimeout(orTimeout);
+
+        if (orResp.ok) {
+          const orJson = await orResp.json();
+          const generated = orJson.choices?.[0]?.message?.content?.trim();
+          if (generated) {
+            return NextResponse.json({
+              ok: true,
+              original: cleanInput,
+              adapted: generated.replace(/^["']|["']$/g, "").trim(),
+              style: styleKey,
+              engine: "openrouter-gemini-2.5-flash",
+              model: "google/gemini-2.5-flash",
+              variation: Boolean(variation),
+            });
+          }
+        }
+      } catch (orErr) {
+        console.warn("Fallback OpenRouter falhou:", orErr);
       }
     }
 

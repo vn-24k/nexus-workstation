@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || "";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 const HF_TOKEN = process.env.HF_TOKEN || "";
 
 const SYSTEM_PROMPT = `Você é o Assistente Executivo, Criativo e Estratégico do Studio VN (vn-24k).
@@ -128,7 +129,7 @@ export async function POST(req: NextRequest) {
             contents.push({ role: "user", parts: [{ text: cleanInput }] });
           }
 
-          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GOOGLE_API_KEY}`;
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${GOOGLE_API_KEY}`;
           const gResp = await fetch(geminiUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -158,7 +159,7 @@ export async function POST(req: NextRequest) {
             const text = gJson.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
             if (text) {
               botReply = text;
-              engineUsed = "gemini-flash-latest (uncensored)";
+              engineUsed = "gemini-flash-lite (uncensored)";
             }
           }
         } catch (geminiErr: any) {
@@ -166,7 +167,101 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 3. Fallback Secundário: Hugging Face Router
+      // 3. Fallback OpenRouter Primário (Google Gemini 2.5 Flash via OpenRouter)
+      if (!botReply && OPENROUTER_API_KEY) {
+        try {
+          const orController = new AbortController();
+          const orTimeout = setTimeout(() => orController.abort(), 9000);
+
+          const recentHistory = db
+            .getMessages()
+            .slice(-8)
+            .map((m) => ({
+              role: m.role === "user" ? "user" : "assistant",
+              content: m.content,
+            }));
+
+          const orResp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "google/gemini-2.5-flash",
+              messages: [
+                { role: "system", content: SYSTEM_PROMPT },
+                ...recentHistory,
+                { role: "user", content: cleanInput },
+              ],
+              max_tokens: 1000,
+              temperature: 0.7,
+            }),
+            signal: orController.signal,
+          });
+          clearTimeout(orTimeout);
+
+          if (orResp.ok) {
+            const orJson = await orResp.json();
+            const gen = orJson.choices?.[0]?.message?.content?.trim();
+            if (gen) {
+              botReply = gen;
+              engineUsed = "openrouter-gemini-2.5-flash";
+            }
+          }
+        } catch (orErr: any) {
+          console.warn("Falha no OpenRouter Gemini:", orErr.message);
+        }
+      }
+
+      // 4. Fallback OpenRouter Secundário (DeepSeek Chat via OpenRouter)
+      if (!botReply && OPENROUTER_API_KEY) {
+        try {
+          const dsController = new AbortController();
+          const dsTimeout = setTimeout(() => dsController.abort(), 9000);
+
+          const recentHistory = db
+            .getMessages()
+            .slice(-8)
+            .map((m) => ({
+              role: m.role === "user" ? "user" : "assistant",
+              content: m.content,
+            }));
+
+          const dsResp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "deepseek/deepseek-chat",
+              messages: [
+                { role: "system", content: SYSTEM_PROMPT },
+                ...recentHistory,
+                { role: "user", content: cleanInput },
+              ],
+              max_tokens: 1000,
+              temperature: 0.7,
+            }),
+            signal: dsController.signal,
+          });
+          clearTimeout(dsTimeout);
+
+          if (dsResp.ok) {
+            const dsJson = await dsResp.json();
+            const gen = dsJson.choices?.[0]?.message?.content?.trim();
+            if (gen) {
+              botReply = gen;
+              engineUsed = "openrouter-deepseek";
+            }
+          }
+        } catch (dsErr: any) {
+          console.warn("Falha no OpenRouter DeepSeek:", dsErr.message);
+        }
+      }
+
+      // 5. Fallback Hugging Face Router
       if (!botReply && HF_TOKEN) {
         try {
           const hfController = new AbortController();
@@ -213,9 +308,9 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 4. Fallback de Segurança
+      // 6. Resposta Conversacional Autoral de Segurança (Caso todos os provedores externos oscilem)
       if (!botReply) {
-        botReply = `Compreendido. Sua instrução "${cleanInput}" foi registrada no cluster. O motor de inferência neural está pronto para deliberações técnicas, cálculos e geração de roteiros.`;
+        botReply = `Tranquilo meu parceiro, recebi sua mensagem perfeitamente aqui: "${cleanInput}". Pode mandar a próxima ideia, pergunta ou roteiro que a gente já desenrola agora sem filtro nenhum!`;
       }
     }
 
