@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
-import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
 function getBridgeUrl(reqUrl?: string): string {
-  // Check local file if running on same host
   try {
     const configPath = '/root/.config/bridge_tunnel_url';
     if (fs.existsSync(configPath)) {
@@ -14,7 +12,7 @@ function getBridgeUrl(reqUrl?: string): string {
     }
   } catch (e) {}
 
-  return process.env.WHATSAPP_BRIDGE_URL || 'https://0a1e93684b55d3.app.lhr.life';
+  return process.env.WHATSAPP_BRIDGE_URL || 'https://always-chairs-evaluated-flyer.trycloudflare.com';
 }
 
 export async function GET(req: Request) {
@@ -39,6 +37,14 @@ export async function GET(req: Request) {
         ok: true,
         bridgeUrl: targetBridgeUrl,
         connected: data.connected,
+        primary: data.primary || {
+          connected: data.connected,
+          phone: data.phone || '5511995685756'
+        },
+        secondary: data.secondary || {
+          connected: false,
+          phone: '6285142001939'
+        },
         phone: data.phone || '5511995685756',
         activeUserJid: data.activeUserJid
       });

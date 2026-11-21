@@ -4,7 +4,7 @@ import fs from "fs";
 export const dynamic = "force-dynamic";
 
 const FISH_AUDIO_API_KEY = process.env.FISH_AUDIO_API_KEY || "sk-fish-RFtQu0UUESjwP6F9hPPwA9keMox40MXL_E5WZtK0TkQ";
-const VOICE_REF_ID = "d34eb157e1e7474c98c9c63d79f7ce9a";
+const DEFAULT_VOICE_REF_ID = "d34eb157e1e7474c98c9c63d79f7ce9a";
 
 // Contact resolver matching local phone directory & rules
 function resolvePhone(input: string): string {
@@ -42,7 +42,19 @@ function getBridgeUrl(custom?: string): string {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { text, phone, audioBase64, videoBase64, type, ptv, caption, bridgeUrl } = body;
+    const {
+      text,
+      phone,
+      audioBase64,
+      videoBase64,
+      type,
+      ptv,
+      caption,
+      bridgeUrl,
+      account = "primary",
+      voiceId,
+      referenceId
+    } = body;
 
     const targetPhone = resolvePhone(phone);
     if (!targetPhone) {
@@ -50,6 +62,7 @@ export async function POST(req: NextRequest) {
     }
 
     const activeBridge = getBridgeUrl(bridgeUrl);
+    const activeVoiceRef = referenceId || voiceId || DEFAULT_VOICE_REF_ID;
 
     // 1. VIDEO DISPATCH (Standard MP4 or Push-to-Video Note)
     if (type === "video" || videoBase64) {
@@ -73,6 +86,7 @@ export async function POST(req: NextRequest) {
           videoBase64: rawVideoBase64,
           caption: caption || text || undefined,
           ptv: ptv === true,
+          account,
         }),
         signal: bridgeController.signal,
       });
@@ -92,7 +106,8 @@ export async function POST(req: NextRequest) {
         ok: true,
         type: "video",
         ptv: ptv === true,
-        sender: "5511995685756",
+        account: bridgeResult.account || account,
+        sender: bridgeResult.sentFrom || (account === "secondary" ? "6285142001939" : "5511995685756"),
         sentTo: bridgeResult.sentTo || targetPhone,
         messageId: bridgeResult.messageId,
         bridgeUrl: activeBridge,
@@ -118,8 +133,10 @@ export async function POST(req: NextRequest) {
         },
         body: JSON.stringify({
           text: cleanText,
-          reference_id: VOICE_REF_ID,
+          reference_id: activeVoiceRef,
           format: "mp3",
+          temperature: 0.85,
+          top_p: 0.88,
         }),
       });
 
@@ -144,6 +161,7 @@ export async function POST(req: NextRequest) {
         phone: targetPhone,
         audioBase64: audioData,
         ptt: true,
+        account,
       }),
       signal: bridgeController.signal,
     });
@@ -163,7 +181,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       type: "audio",
-      sender: "5511995685756",
+      account: bridgeResult.account || account,
+      sender: bridgeResult.sentFrom || (account === "secondary" ? "6285142001939" : "5511995685756"),
       sentTo: bridgeResult.sentTo || targetPhone,
       messageId: bridgeResult.messageId,
       bridgeUrl: activeBridge,

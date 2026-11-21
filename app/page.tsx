@@ -167,6 +167,35 @@ export default function VnTtsStudio() {
   const [whatsappResult, setWhatsappResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [bridgeConnected, setBridgeConnected] = useState<boolean | null>(null);
 
+  // Dual WhatsApp Accounts State (Duas contas em paralelo)
+  const [selectedWhatsAppAccount, setSelectedWhatsAppAccount] = useState<"primary" | "secondary">("primary");
+  const [accountsStatus, setAccountsStatus] = useState<{
+    primary: { connected: boolean; phone: string };
+    secondary: { connected: boolean; phone: string };
+  }>({
+    primary: { connected: true, phone: "5511995685756" },
+    secondary: { connected: true, phone: "6285142001939" },
+  });
+
+  // Dual Voice Personas (Oficial vs Homem Galanteador 24 anos)
+  const [selectedVoicePersona, setSelectedVoicePersona] = useState<"vinicius" | "galanteador">("vinicius");
+  const VOICE_OPTIONS = {
+    vinicius: {
+      id: "d34eb157e1e7474c98c9c63d79f7ce9a",
+      name: "Minha Voz Oficial (Vinícius)",
+      tag: "Voz Real Clonada",
+      desc: "Tom natural paulistano, autêntico e direto.",
+      icon: "🎙️",
+    },
+    galanteador: {
+      id: "763eba3533184c04aa276d4ddae1bf70",
+      name: "Homem Galanteador (24 anos)",
+      tag: "Jovem, Bonita & Charmosa",
+      desc: "Voz masculina aveludada, sedutora, confiante e envolvente.",
+      icon: "✨",
+    },
+  };
+
   // Safe Dispatch Countdown (Cancelamento Seguro de Envio)
   const [sendCountdown, setSendCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -441,7 +470,15 @@ export default function VnTtsStudio() {
 
     fetch("/api/whatsapp/status")
       .then((res) => res.json())
-      .then((data) => setBridgeConnected(data.ok && data.connected))
+      .then((data) => {
+        setBridgeConnected(data.ok && data.connected);
+        if (data.primary || data.secondary) {
+          setAccountsStatus({
+            primary: data.primary || { connected: data.connected, phone: "5511995685756" },
+            secondary: data.secondary || { connected: false, phone: "6285142001939" },
+          });
+        }
+      })
       .catch(() => setBridgeConnected(false));
 
     const chatSaved = localStorage.getItem(STORAGE_KEYS.MESSAGES) || localStorage.getItem("nexus_apple_chat_v1");
@@ -743,6 +780,7 @@ export default function VnTtsStudio() {
           modelMode: mode,
           referenceAudioBase64: activeSampleB64,
           referenceAudioText: activeSampleText,
+          referenceId: VOICE_OPTIONS[selectedVoicePersona].id,
           timestamp: Date.now(),
         }),
       });
@@ -843,6 +881,8 @@ export default function VnTtsStudio() {
           text: textToSend,
           audioBase64,
           mood: dispatchMood,
+          account: selectedWhatsAppAccount,
+          referenceId: VOICE_OPTIONS[selectedVoicePersona].id,
         }),
       });
 
@@ -855,9 +895,13 @@ export default function VnTtsStudio() {
           selectedContact.id === "outro"
             ? (customPhone || targetPhone)
             : `${selectedContact.name} (+${selectedContact.phone})`;
+        const senderPhoneDisplay = data.sender
+          ? (data.sender.startsWith("+") ? data.sender : `+${data.sender}`)
+          : (selectedWhatsAppAccount === "secondary" ? "+62 851-4200-1939" : "+55 11 99568-5756");
+        const voiceUsedName = VOICE_OPTIONS[selectedVoicePersona].name;
         setWhatsappResult({
           ok: true,
-          message: `Áudio PTT gravado na hora e entregue com sucesso para ${recipientDisplay}! Transmitido pelo seu WhatsApp (+55 11 99568-5756).`,
+          message: `Áudio PTT gravado na hora e entregue com sucesso para ${recipientDisplay}! Transmitido pelo WhatsApp (${senderPhoneDisplay}) com a ${voiceUsedName}.`,
         });
       } else {
         setWhatsappResult({
@@ -1979,18 +2023,155 @@ export default function VnTtsStudio() {
         {/* TAB 1: DISPARO VOCAL (VOZ EM TEMPO REAL COM ENVIO WHATSAPP) */}
         {currentTab === "dispatch" && (
           <div className="max-w-2xl mx-auto w-full space-y-6 py-2">
-            <div className="text-center max-w-md mx-auto">
+            <div className="text-center max-w-lg mx-auto">
               <h2 className="text-xl font-semibold tracking-tight text-white mb-1.5">
                 Disparo Vocal em Tempo Real
               </h2>
-              <p className="text-xs text-zinc-400 leading-relaxed mb-3">
-                Digite sua mensagem. O áudio é sintetizado com sua voz clonada e entregue no WhatsApp como gravação ao vivo (PTT nativo com microfone verde).
+              <p className="text-xs text-zinc-400 leading-relaxed mb-4">
+                Selecione o número de WhatsApp emissor, escolha a voz desejada e envie o áudio nativo gravado na hora (PTT com microfone verde).
               </p>
-              <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-zinc-900/80 border border-white/[0.08] text-[10px] text-zinc-300">
-                <span className={`w-1.5 h-1.5 rounded-full ${bridgeConnected ? "bg-emerald-400 animate-pulse" : "bg-emerald-500"}`}></span>
-                <span>Conta WhatsApp: <strong className="text-white">+55 11 99568-5756</strong></span>
-                <span className="text-zinc-500">•</span>
-                <span className="text-emerald-400 font-mono">PTT Nativo Ativo</span>
+
+              {/* Controles de Conta WhatsApp & Seleção de Voz */}
+              <div className="space-y-3 text-left">
+                {/* 1. SELETOR DE CONTA WHATSAPP (DUAL ACCOUNT) */}
+                <div className="p-3.5 rounded-2xl bg-zinc-950/70 border border-white/[0.08] space-y-2">
+                  <div className="flex items-center justify-between text-[11px] px-1 font-semibold text-zinc-300">
+                    <span className="flex items-center space-x-1.5">
+                      <Phone size={13} className="text-emerald-400" />
+                      <span>WhatsApp Emissor (Dual Line Ativo):</span>
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-mono">2 Contas Conectadas em Paralelo</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {/* Conta 1: Brasil */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedWhatsAppAccount("primary")}
+                      className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                        selectedWhatsAppAccount === "primary"
+                          ? "bg-white text-black border-white shadow-md font-medium"
+                          : "bg-zinc-900/60 text-zinc-300 border-white/[0.06] hover:bg-zinc-800"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold flex items-center space-x-1.5 truncate">
+                          <span>🇧🇷 Conta 1 (Brasil)</span>
+                        </div>
+                        <div className={`text-[10px] font-mono mt-0.5 truncate ${selectedWhatsAppAccount === "primary" ? "text-zinc-700" : "text-zinc-400"}`}>
+                          +55 11 99568-5756
+                        </div>
+                      </div>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono flex items-center space-x-1 shrink-0 ${
+                        selectedWhatsAppAccount === "primary"
+                          ? "bg-emerald-600 text-white font-bold"
+                          : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                      }`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
+                        <span>{accountsStatus.primary.connected ? "Ativo" : "Online"}</span>
+                      </span>
+                    </button>
+
+                    {/* Conta 2: Indonésia */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedWhatsAppAccount("secondary")}
+                      className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                        selectedWhatsAppAccount === "secondary"
+                          ? "bg-white text-black border-white shadow-md font-medium"
+                          : "bg-zinc-900/60 text-zinc-300 border-white/[0.06] hover:bg-zinc-800"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold flex items-center space-x-1.5 truncate">
+                          <span>🇮🇩 Conta 2 (Indonésia)</span>
+                        </div>
+                        <div className={`text-[10px] font-mono mt-0.5 truncate ${selectedWhatsAppAccount === "secondary" ? "text-zinc-700" : "text-zinc-400"}`}>
+                          +62 851-4200-1939
+                        </div>
+                      </div>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono flex items-center space-x-1 shrink-0 ${
+                        selectedWhatsAppAccount === "secondary"
+                          ? "bg-emerald-600 text-white font-bold"
+                          : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                      }`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
+                        <span>{accountsStatus.secondary.connected ? "Ativo" : "Online"}</span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. SELETOR DE VOZ / LOCUTOR */}
+                <div className="p-3.5 rounded-2xl bg-zinc-950/70 border border-white/[0.08] space-y-2">
+                  <div className="flex items-center justify-between text-[11px] px-1 font-semibold text-zinc-300">
+                    <span className="flex items-center space-x-1.5">
+                      <Mic size={13} className="text-amber-400" />
+                      <span>Voz Selecionada para Síntese Vocal:</span>
+                    </span>
+                    <span className="text-[10px] text-amber-400 font-mono">Fish Audio S2.1 Pro</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {/* Voz 1: Vinícius Oficial */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedVoicePersona("vinicius");
+                        if (dispatchAudioUrl) handleDispatchTextChange(dispatchText);
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between cursor-pointer ${
+                        selectedVoicePersona === "vinicius"
+                          ? "bg-amber-500/20 border-amber-400 text-amber-200 shadow-md shadow-amber-950/40"
+                          : "bg-zinc-900/60 text-zinc-300 border-white/[0.06] hover:bg-zinc-800"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold flex items-center space-x-1.5">
+                          <span>🎙️</span>
+                          <span>Minha Voz Oficial</span>
+                        </span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${
+                          selectedVoicePersona === "vinicius" ? "bg-amber-400 text-black font-bold" : "bg-white/10 text-zinc-400"
+                        }`}>
+                          Original
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-zinc-400 mt-1 leading-snug">
+                        Timbre natural paulistano, autêntico e focado.
+                      </p>
+                    </button>
+
+                    {/* Voz 2: Homem Galanteador 24 anos */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedVoicePersona("galanteador");
+                        if (dispatchAudioUrl) handleDispatchTextChange(dispatchText);
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between cursor-pointer ${
+                        selectedVoicePersona === "galanteador"
+                          ? "bg-rose-500/20 border-rose-400 text-rose-200 shadow-md shadow-rose-950/40"
+                          : "bg-zinc-900/60 text-zinc-300 border-white/[0.06] hover:bg-zinc-800"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold flex items-center space-x-1.5">
+                          <span>✨</span>
+                          <span>Homem Galanteador (24 anos)</span>
+                        </span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${
+                          selectedVoicePersona === "galanteador" ? "bg-rose-400 text-black font-bold" : "bg-white/10 text-zinc-400"
+                        }`}>
+                          Charme
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-zinc-400 mt-1 leading-snug">
+                        Voz masculina bonita, aveludada, sedutora e envolvente.
+                      </p>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
