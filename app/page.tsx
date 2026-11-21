@@ -177,22 +177,132 @@ export default function VnTtsStudio() {
     secondary: { connected: true, phone: "6285142001939" },
   });
 
-  // Dual Voice Personas (Oficial vs Homem Galanteador 24 anos)
-  const [selectedVoicePersona, setSelectedVoicePersona] = useState<"vinicius" | "galanteador">("vinicius");
-  const VOICE_OPTIONS = {
+  // Catálogo Completo de Vozes (12 Opções: Femininas, Galanteadores e Locução)
+  const [selectedVoicePersona, setSelectedVoicePersona] = useState<string>("vinicius");
+  const [voiceCategoryFilter, setVoiceCategoryFilter] = useState<"todas" | "principais" | "femininas" | "jovens" | "locucao">("todas");
+  const [previewingVoiceKey, setPreviewingVoiceKey] = useState<string | null>(null);
+  const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const VOICE_OPTIONS: Record<string, {
+    id: string;
+    name: string;
+    category: "principais" | "femininas" | "jovens" | "locucao";
+    tag: string;
+    desc: string;
+    icon: string;
+    badgeColor: string;
+  }> = {
+    // 1. Principais
     vinicius: {
       id: "d34eb157e1e7474c98c9c63d79f7ce9a",
       name: "Minha Voz Oficial (Vinícius)",
+      category: "principais",
       tag: "Voz Real Clonada",
-      desc: "Tom natural paulistano, autêntico e direto.",
+      desc: "Tom natural paulistano, autêntico, dinâmico e direto.",
       icon: "🎙️",
+      badgeColor: "bg-amber-400 text-black",
     },
     galanteador: {
       id: "763eba3533184c04aa276d4ddae1bf70",
       name: "Homem Galanteador (24 anos)",
-      tag: "Jovem, Bonita & Charmosa",
-      desc: "Voz masculina aveludada, sedutora, confiante e envolvente.",
+      category: "principais",
+      tag: "Charme & Sedução",
+      desc: "Voz jovem aveludada, sedutora, confiante e envolvente.",
       icon: "✨",
+      badgeColor: "bg-rose-400 text-black",
+    },
+    // 2. Vozes Femininas (Jovem e Madura)
+    isabela: {
+      id: "5661bf8cb97740fcb10d2f756abf7779",
+      name: "Isabela (Mulher Jovem ~22 anos)",
+      category: "femininas",
+      tag: "Jovem & Meiga",
+      desc: "Voz feminina jovem, doce, nítida, amigável e suave.",
+      icon: "🌸",
+      badgeColor: "bg-pink-400 text-black",
+    },
+    helena: {
+      id: "eb81775a43bc469dafda02de59d13cb7",
+      name: "Helena (Mulher Madura ~45 anos)",
+      category: "femininas",
+      tag: "Madura & Elegante",
+      desc: "Voz feminina acolhedora, madura, refinada e segura.",
+      icon: "🍷",
+      badgeColor: "bg-purple-400 text-white",
+    },
+    // 3. Vozes Jovens & Galanteadoras
+    lucas: {
+      id: "4b02d057165c4798b0ceba194b765e90",
+      name: "Lucas (Jovem Descontraído 23 anos)",
+      category: "jovens",
+      tag: "Energia & Sorriso na Voz",
+      desc: "Voz jovem masculina, descontraída, comunicativa e moderna.",
+      icon: "⚡",
+      badgeColor: "bg-cyan-400 text-black",
+    },
+    adam: {
+      id: "84c748173dc14017a29c99ff7feb4d32",
+      name: "Adam (Elegante & Magnético 26 anos)",
+      category: "jovens",
+      tag: "Atraente & Confiante",
+      desc: "Dicção limpa, tom equilibrado, charmoso e envolvente.",
+      icon: "💎",
+      badgeColor: "bg-indigo-400 text-white",
+    },
+    // 4. Locução, Graves & Narração
+    jarvis: {
+      id: "a5b93aeddcc948c19ea04f0afe9d178c",
+      name: "Jarvis (Grave & Sofisticado)",
+      category: "locucao",
+      tag: "Grave Tecnológico",
+      desc: "Tom solene, calmo, preciso, imponente e sofisticado.",
+      icon: "🤖",
+      badgeColor: "bg-blue-400 text-black",
+    },
+    rodrigo: {
+      id: "df1fa6d2ae194b3ebcbae60df48fde35",
+      name: "Rodrigo (Locutor Comercial / Rádio)",
+      category: "locucao",
+      tag: "Radialista & Propagandas",
+      desc: "Voz aberta e potente de propaganda e chamadas de rádio.",
+      icon: "📻",
+      badgeColor: "bg-orange-400 text-black",
+    },
+    waldo: {
+      id: "04736e4d6a644abab81e601a7d2ae4b9",
+      name: "Waldo Morais (Cinematográfico)",
+      category: "locucao",
+      tag: "Trailer de Cinema",
+      desc: "Grave épico e impactante, feito para trailers e dramas.",
+      icon: "🎬",
+      badgeColor: "bg-red-400 text-white",
+    },
+    alberto: {
+      id: "95e01d953caa4e6498d51635808c0da9",
+      name: "Alberto Acosta (Locutor Institucional)",
+      category: "locucao",
+      tag: "Autoridade & Respeito",
+      desc: "Narração clássica madura com dicção irretocável.",
+      icon: "🏛️",
+      badgeColor: "bg-emerald-400 text-black",
+    },
+    marcos: {
+      id: "b59c8403f2354d46ba0003589b947316",
+      name: "Marcos (Narração Noturna & Aveludada)",
+      category: "locucao",
+      tag: "Reflexivo & Intimista",
+      desc: "Grave macio, ritmo pausado, reflexivo e acolhedor.",
+      icon: "🌙",
+      badgeColor: "bg-teal-400 text-black",
+    },
+    cid: {
+      id: "85ecdf7683d64d0884d818971dbfddb4",
+      name: "Cid Moreira AI (Clássico Solene)",
+      category: "locucao",
+      tag: "Lenda da Narração",
+      desc: "O timbre grave e solene mais marcante do Brasil.",
+      icon: "📜",
+      badgeColor: "bg-amber-500 text-black",
     },
   };
 
@@ -839,6 +949,63 @@ export default function VnTtsStudio() {
         console.error("Erro ao tocar áudio:", e);
         setIsPlayingDispatchAudio(false);
       });
+  };
+
+  // Preview de Amostra de Qualquer Voz do Catálogo em Tempo Real
+  const handlePreviewVoice = async (voiceKey: string, voiceId: string, voiceName: string) => {
+    if (previewingVoiceKey === voiceKey) {
+      if (voicePreviewAudioRef.current) {
+        voicePreviewAudioRef.current.pause();
+        voicePreviewAudioRef.current = null;
+      }
+      setPreviewingVoiceKey(null);
+      return;
+    }
+
+    if (voicePreviewAudioRef.current) {
+      voicePreviewAudioRef.current.pause();
+      voicePreviewAudioRef.current = null;
+    }
+
+    setPreviewingVoiceKey(voiceKey);
+
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          text: `Olá! Essa é uma demonstração da voz ${voiceName} com síntese vocal nativa.`,
+          referenceId: voiceId,
+          timestamp: Date.now(),
+        }),
+      });
+
+      if (!res.ok) throw new Error("Erro ao gerar amostra");
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      voicePreviewAudioRef.current = audio;
+
+      audio.onended = () => {
+        setPreviewingVoiceKey(null);
+        voicePreviewAudioRef.current = null;
+      };
+
+      audio.onerror = () => {
+        setPreviewingVoiceKey(null);
+        voicePreviewAudioRef.current = null;
+      };
+
+      audio.play().catch(() => {
+        setPreviewingVoiceKey(null);
+        voicePreviewAudioRef.current = null;
+      });
+    } catch (e) {
+      console.error(e);
+      setPreviewingVoiceKey(null);
+    }
   };
 
   // Execução final do disparo via WhatsApp Bridge
@@ -2102,74 +2269,109 @@ export default function VnTtsStudio() {
                   </div>
                 </div>
 
-                {/* 2. SELETOR DE VOZ / LOCUTOR */}
-                <div className="p-3.5 rounded-2xl bg-zinc-950/70 border border-white/[0.08] space-y-2">
-                  <div className="flex items-center justify-between text-[11px] px-1 font-semibold text-zinc-300">
-                    <span className="flex items-center space-x-1.5">
-                      <Mic size={13} className="text-amber-400" />
-                      <span>Voz Selecionada para Síntese Vocal:</span>
-                    </span>
-                    <span className="text-[10px] text-amber-400 font-mono">Fish Audio S2.1 Pro</span>
+                {/* 2. SELETOR DE VOZ / LOCUTOR (CATÁLOGO COMPLETO DE 12 VOZES) */}
+                <div className="p-4 rounded-2xl bg-zinc-950/70 border border-white/[0.08] space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 px-1 pb-1 border-b border-white/5">
+                    <div>
+                      <span className="text-[11px] font-semibold text-zinc-200 flex items-center space-x-1.5">
+                        <Mic size={13} className="text-amber-400" />
+                        <span>Catálogo de Vozes (12 Opções Nativas):</span>
+                      </span>
+                      <span className="text-[10px] text-zinc-400">
+                        Voz selecionada: <strong className="text-white">{VOICE_OPTIONS[selectedVoicePersona]?.name}</strong>
+                      </span>
+                    </div>
+
+                    {/* Filtros de Categoria */}
+                    <div className="flex items-center gap-1 p-0.5 rounded-xl bg-zinc-900 border border-white/[0.06] text-[10px] overflow-x-auto">
+                      {[
+                        { id: "todas", label: "Todas (12)" },
+                        { id: "principais", label: "Principais (2)" },
+                        { id: "femininas", label: "Femininas (2)" },
+                        { id: "jovens", label: "Galanteadores (2)" },
+                        { id: "locucao", label: "Locutores & Graves (6)" },
+                      ].map((cat) => (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => setVoiceCategoryFilter(cat.id as any)}
+                          className={`px-2 py-1 rounded-lg transition shrink-0 cursor-pointer ${
+                            voiceCategoryFilter === cat.id
+                              ? "bg-white text-black font-semibold shadow-sm"
+                              : "text-zinc-400 hover:text-white"
+                          }`}
+                        >
+                          {cat.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {/* Voz 1: Vinícius Oficial */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedVoicePersona("vinicius");
-                        if (dispatchAudioUrl) handleDispatchTextChange(dispatchText);
-                      }}
-                      className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between cursor-pointer ${
-                        selectedVoicePersona === "vinicius"
-                          ? "bg-amber-500/20 border-amber-400 text-amber-200 shadow-md shadow-amber-950/40"
-                          : "bg-zinc-900/60 text-zinc-300 border-white/[0.06] hover:bg-zinc-800"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold flex items-center space-x-1.5">
-                          <span>🎙️</span>
-                          <span>Minha Voz Oficial</span>
-                        </span>
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${
-                          selectedVoicePersona === "vinicius" ? "bg-amber-400 text-black font-bold" : "bg-white/10 text-zinc-400"
-                        }`}>
-                          Original
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-zinc-400 mt-1 leading-snug">
-                        Timbre natural paulistano, autêntico e focado.
-                      </p>
-                    </button>
+                  {/* Grid das Vozes Filtradas */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[360px] overflow-y-auto pr-1">
+                    {Object.entries(VOICE_OPTIONS)
+                      .filter(([_, v]) => voiceCategoryFilter === "todas" || v.category === voiceCategoryFilter)
+                      .map(([key, v]) => {
+                        const isSelected = selectedVoicePersona === key;
+                        const isPreviewing = previewingVoiceKey === key;
+                        return (
+                          <div
+                            key={key}
+                            onClick={() => {
+                              setSelectedVoicePersona(key);
+                              if (dispatchAudioUrl) handleDispatchTextChange(dispatchText);
+                            }}
+                            className={`p-3 rounded-xl border text-left transition flex flex-col justify-between cursor-pointer relative group ${
+                              isSelected
+                                ? "bg-amber-500/15 border-amber-400/90 shadow-md shadow-amber-950/40 ring-1 ring-amber-400/50"
+                                : "bg-zinc-900/50 border-white/[0.06] hover:bg-zinc-850 hover:border-white/10"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-1.5">
+                              <div className="min-w-0">
+                                <div className="text-xs font-semibold text-white flex items-center space-x-1.5 truncate">
+                                  <span>{v.icon}</span>
+                                  <span className="truncate">{v.name}</span>
+                                </div>
+                                <span className={`inline-block text-[9px] px-1.5 py-0.2 rounded-full font-semibold mt-1 ${v.badgeColor}`}>
+                                  {v.tag}
+                                </span>
+                              </div>
 
-                    {/* Voz 2: Homem Galanteador 24 anos */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedVoicePersona("galanteador");
-                        if (dispatchAudioUrl) handleDispatchTextChange(dispatchText);
-                      }}
-                      className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between cursor-pointer ${
-                        selectedVoicePersona === "galanteador"
-                          ? "bg-rose-500/20 border-rose-400 text-rose-200 shadow-md shadow-rose-950/40"
-                          : "bg-zinc-900/60 text-zinc-300 border-white/[0.06] hover:bg-zinc-800"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold flex items-center space-x-1.5">
-                          <span>✨</span>
-                          <span>Homem Galanteador (24 anos)</span>
-                        </span>
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${
-                          selectedVoicePersona === "galanteador" ? "bg-rose-400 text-black font-bold" : "bg-white/10 text-zinc-400"
-                        }`}>
-                          Charme
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-zinc-400 mt-1 leading-snug">
-                        Voz masculina bonita, aveludada, sedutora e envolvente.
-                      </p>
-                    </button>
+                              {/* Botão de Preview de Voz Rápido */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handlePreviewVoice(key, v.id, v.name);
+                                }}
+                                className={`text-[10px] px-2 py-1 rounded-lg border transition shrink-0 flex items-center space-x-1 cursor-pointer ${
+                                  isPreviewing
+                                    ? "bg-amber-400 text-black border-amber-300 font-bold animate-pulse"
+                                    : "bg-white/[0.06] border-white/10 text-zinc-300 hover:text-white hover:bg-white/10"
+                                }`}
+                                title="Ouvir demonstração"
+                              >
+                                {isPreviewing ? (
+                                  <>
+                                    <Square size={10} />
+                                    <span>Parar</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play size={10} />
+                                    <span>Ouvir</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            <p className="text-[10px] text-zinc-400 mt-2 leading-relaxed">
+                              {v.desc}
+                            </p>
+                          </div>
+                        );
+                      })}
                   </div>
                 </div>
               </div>
