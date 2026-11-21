@@ -247,6 +247,52 @@ export default function VnTtsStudio() {
       icon: "📱",
       badgeColor: "bg-amber-300 text-black font-bold",
     },
+    // NOVAS VOZES SEMELHANTES A CAIO E PEDRO (PESSOAS COMUNS / WHATSAPP)
+    caiov2: {
+      id: "4e5e07ccce624b87bcebe8366c48e441",
+      name: "Caio V2 (Solto & Espontâneo 24 anos)",
+      category: "comuns",
+      tag: "Estilo Caio",
+      desc: "Variação direta do Caio, fala solta, informal e super natural.",
+      icon: "💬",
+      badgeColor: "bg-emerald-500 text-black font-bold",
+    },
+    leo: {
+      id: "6aedb65e2a2948c3ab936b448ee5c166",
+      name: "Léo (Relaxado & Papo Solto 23 anos)",
+      category: "comuns",
+      tag: "Estilo Caio/Pedro",
+      desc: "Fala despojada, ritmo leve e descontraído entre amigos.",
+      icon: "🎧",
+      badgeColor: "bg-lime-400 text-black font-bold",
+    },
+    gui: {
+      id: "454f36886c304d47a277aacda49f2a43",
+      name: "Gui (Casual & Áudio WhatsApp 25 anos)",
+      category: "comuns",
+      tag: "Estilo Pedro",
+      desc: "Jovem conversacional, ritmo dinâmico de áudio rápido de WhatsApp.",
+      icon: "⚡",
+      badgeColor: "bg-sky-400 text-black font-bold",
+    },
+    gabriel: {
+      id: "9d9cb605b506486aaa707cc3e8def2f4",
+      name: "Gabriel (Dicção Clara & Amigável 24 anos)",
+      category: "comuns",
+      tag: "Estilo Pedro",
+      desc: "Cadência natural parecida com Pedro, amigável, clara e direta.",
+      icon: "🎯",
+      badgeColor: "bg-teal-300 text-black font-bold",
+    },
+    felipe: {
+      id: "84b6bf5f8bce4000abdfbe6a1981c79e",
+      name: "Felipe (Amigo Conversador 26 anos)",
+      category: "comuns",
+      tag: "Estilo Caio",
+      desc: "Expressivo, tom fraterno de parceiro mandando áudio no dia a dia.",
+      icon: "🔥",
+      badgeColor: "bg-amber-400 text-black font-bold",
+    },
 
     // 2. Principais / Originais
     vinicius: {
@@ -2332,7 +2378,7 @@ export default function VnTtsStudio() {
                     <div>
                       <span className="text-[11px] font-semibold text-zinc-200 flex items-center space-x-1.5">
                         <Mic size={13} className="text-amber-400" />
-                        <span>Catálogo de Vozes (18 Opções Nativas):</span>
+                        <span>Catálogo de Vozes (23 Opções Nativas):</span>
                       </span>
                       <span className="text-[10px] text-zinc-400">
                         Voz selecionada: <strong className="text-white">{VOICE_OPTIONS[selectedVoicePersona]?.name}</strong>
@@ -2342,11 +2388,11 @@ export default function VnTtsStudio() {
                     {/* Filtros de Categoria */}
                     <div className="flex items-center gap-1 p-0.5 rounded-xl bg-zinc-900 border border-white/[0.06] text-[10px] overflow-x-auto">
                       {[
-                        { id: "comuns", label: "💬 Pessoas Comuns (6)" },
+                        { id: "comuns", label: "💬 Pessoas Comuns (11)" },
                         { id: "principais", label: "🎙️ Principais (2)" },
                         { id: "femininas", label: "🌸 Femininas (2)" },
                         { id: "locucao", label: "📻 Locutores & Graves (8)" },
-                        { id: "todas", label: "Todas (18)" },
+                        { id: "todas", label: "Todas (23)" },
                       ].map((cat) => (
                         <button
                           key={cat.id}
