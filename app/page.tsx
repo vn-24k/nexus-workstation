@@ -177,22 +177,78 @@ export default function VnTtsStudio() {
     secondary: { connected: true, phone: "6285142001939" },
   });
 
-  // Catálogo Completo de Vozes (12 Opções: Femininas, Galanteadores e Locução)
-  const [selectedVoicePersona, setSelectedVoicePersona] = useState<string>("vinicius");
-  const [voiceCategoryFilter, setVoiceCategoryFilter] = useState<"todas" | "principais" | "femininas" | "jovens" | "locucao">("todas");
+  // Catálogo Completo de Vozes (18 Opções: Pessoas Comuns, Femininas, Galanteadores e Locução)
+  const [selectedVoicePersona, setSelectedVoicePersona] = useState<string>("caio");
+  const [voiceCategoryFilter, setVoiceCategoryFilter] = useState<"todas" | "comuns" | "principais" | "femininas" | "locucao">("comuns");
   const [previewingVoiceKey, setPreviewingVoiceKey] = useState<string | null>(null);
   const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const VOICE_OPTIONS: Record<string, {
     id: string;
     name: string;
-    category: "principais" | "femininas" | "jovens" | "locucao";
+    category: "principais" | "comuns" | "femininas" | "locucao";
     tag: string;
     desc: string;
     icon: string;
     badgeColor: string;
   }> = {
-    // 1. Principais
+    // 1. PESSOAS COMUNS & NATURAIS (ÁUDIO DE WHATSAPP / ZERO FAMOSOS)
+    caio: {
+      id: "ce6e97764ad8414ba2cc5f431df02a2b",
+      name: "Caio (Casual & Dia a Dia 24 anos)",
+      category: "comuns",
+      tag: "Conversa 100% Natural",
+      desc: "Fala informal, solta e espontânea, parece um amigo batendo papo no WhatsApp.",
+      icon: "💬",
+      badgeColor: "bg-emerald-400 text-black font-bold",
+    },
+    renan: {
+      id: "ead81e22e19948edb78857e5e79b6cbc",
+      name: "Renan (Conversa Relaxada 25 anos)",
+      category: "comuns",
+      tag: "Tranquilo & Pés no Chão",
+      desc: "Tom mansa, suave e despretensioso, zero afetação ou pose.",
+      icon: "☕",
+      badgeColor: "bg-teal-400 text-black font-bold",
+    },
+    matheus: {
+      id: "9f2f8bf8a2184cb1a93a7c7db31e4b2f",
+      name: "Matheus (Jovem Comum 23 anos)",
+      category: "comuns",
+      tag: "Espontâneo & Próximo",
+      desc: "Voz jovem amigável de quem está na correria do dia a dia.",
+      icon: "🤙",
+      badgeColor: "bg-cyan-400 text-black font-bold",
+    },
+    pedro: {
+      id: "eeaf0a38491745ef97765bf0d9066834",
+      name: "Pedro (Papo Amigo 26 anos)",
+      category: "comuns",
+      tag: "Amigo & Direto",
+      desc: "Dicção limpa e calorosa de conversa casual entre parceiros.",
+      icon: "🤝",
+      badgeColor: "bg-blue-400 text-black font-bold",
+    },
+    eduardo: {
+      id: "ccf182b54bd4490dac78fa4ac29223c9",
+      name: "Eduardo (Homem Adulto Comum 34 anos)",
+      category: "comuns",
+      tag: "Adulto Cotidiano",
+      desc: "Voz comum e equilibrada de homem de 34 anos, sem pose de radialista.",
+      icon: "👤",
+      badgeColor: "bg-zinc-300 text-black font-bold",
+    },
+    thiago: {
+      id: "c016108a7e984803b39dd73863509607",
+      name: "Thiago (Próximo & Descontraído 24 anos)",
+      category: "comuns",
+      tag: "Papo Espontâneo",
+      desc: "Conversa agradável, ritmo autêntico de mensagem de voz no WhatsApp.",
+      icon: "📱",
+      badgeColor: "bg-amber-300 text-black font-bold",
+    },
+
+    // 2. Principais / Originais
     vinicius: {
       id: "d34eb157e1e7474c98c9c63d79f7ce9a",
       name: "Minha Voz Oficial (Vinícius)",
@@ -211,7 +267,8 @@ export default function VnTtsStudio() {
       icon: "✨",
       badgeColor: "bg-rose-400 text-black",
     },
-    // 2. Vozes Femininas (Jovem e Madura)
+
+    // 3. Vozes Femininas (Jovem e Madura)
     isabela: {
       id: "5661bf8cb97740fcb10d2f756abf7779",
       name: "Isabela (Mulher Jovem ~22 anos)",
@@ -230,26 +287,26 @@ export default function VnTtsStudio() {
       icon: "🍷",
       badgeColor: "bg-purple-400 text-white",
     },
-    // 3. Vozes Jovens & Galanteadoras
-    lucas: {
-      id: "4b02d057165c4798b0ceba194b765e90",
-      name: "Lucas (Jovem Descontraído 23 anos)",
-      category: "jovens",
-      tag: "Energia & Sorriso na Voz",
-      desc: "Voz jovem masculina, descontraída, comunicativa e moderna.",
-      icon: "⚡",
-      badgeColor: "bg-cyan-400 text-black",
-    },
+
+    // 4. Locução, Graves & Narração
     adam: {
       id: "84c748173dc14017a29c99ff7feb4d32",
       name: "Adam (Elegante & Magnético 26 anos)",
-      category: "jovens",
+      category: "locucao",
       tag: "Atraente & Confiante",
       desc: "Dicção limpa, tom equilibrado, charmoso e envolvente.",
       icon: "💎",
       badgeColor: "bg-indigo-400 text-white",
     },
-    // 4. Locução, Graves & Narração
+    lucas: {
+      id: "4b02d057165c4798b0ceba194b765e90",
+      name: "Lucas (Jovem Descontraído 23 anos)",
+      category: "locucao",
+      tag: "Energia & Sorriso",
+      desc: "Voz jovem masculina comunicativa e animada.",
+      icon: "⚡",
+      badgeColor: "bg-cyan-400 text-black",
+    },
     jarvis: {
       id: "a5b93aeddcc948c19ea04f0afe9d178c",
       name: "Jarvis (Grave & Sofisticado)",
@@ -2275,7 +2332,7 @@ export default function VnTtsStudio() {
                     <div>
                       <span className="text-[11px] font-semibold text-zinc-200 flex items-center space-x-1.5">
                         <Mic size={13} className="text-amber-400" />
-                        <span>Catálogo de Vozes (12 Opções Nativas):</span>
+                        <span>Catálogo de Vozes (18 Opções Nativas):</span>
                       </span>
                       <span className="text-[10px] text-zinc-400">
                         Voz selecionada: <strong className="text-white">{VOICE_OPTIONS[selectedVoicePersona]?.name}</strong>
@@ -2285,17 +2342,17 @@ export default function VnTtsStudio() {
                     {/* Filtros de Categoria */}
                     <div className="flex items-center gap-1 p-0.5 rounded-xl bg-zinc-900 border border-white/[0.06] text-[10px] overflow-x-auto">
                       {[
-                        { id: "todas", label: "Todas (12)" },
-                        { id: "principais", label: "Principais (2)" },
-                        { id: "femininas", label: "Femininas (2)" },
-                        { id: "jovens", label: "Galanteadores (2)" },
-                        { id: "locucao", label: "Locutores & Graves (6)" },
+                        { id: "comuns", label: "💬 Pessoas Comuns (6)" },
+                        { id: "principais", label: "🎙️ Principais (2)" },
+                        { id: "femininas", label: "🌸 Femininas (2)" },
+                        { id: "locucao", label: "📻 Locutores & Graves (8)" },
+                        { id: "todas", label: "Todas (18)" },
                       ].map((cat) => (
                         <button
                           key={cat.id}
                           type="button"
                           onClick={() => setVoiceCategoryFilter(cat.id as any)}
-                          className={`px-2 py-1 rounded-lg transition shrink-0 cursor-pointer ${
+                          className={`px-2.5 py-1 rounded-lg transition shrink-0 cursor-pointer font-medium ${
                             voiceCategoryFilter === cat.id
                               ? "bg-white text-black font-semibold shadow-sm"
                               : "text-zinc-400 hover:text-white"
