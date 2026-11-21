@@ -12,7 +12,7 @@ function getBridgeUrl(reqUrl?: string): string {
     }
   } catch (e) {}
 
-  return process.env.WHATSAPP_BRIDGE_URL || 'https://always-chairs-evaluated-flyer.trycloudflare.com';
+  return process.env.WHATSAPP_BRIDGE_URL || 'https://launched-threats-constitute-cellular.trycloudflare.com';
 }
 
 export async function GET(req: Request) {
