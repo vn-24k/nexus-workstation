@@ -122,6 +122,40 @@ const STORAGE_KEYS = {
 };
 
 // Preset Contacts
+const WORLD_DDI_MAP: Record<string, { name: string; flag: string }> = {
+  "886": { name: "Taiwan", flag: "🇹🇼" },
+  "55": { name: "Brasil", flag: "🇧🇷" },
+  "66": { name: "Tailândia", flag: "🇹🇭" },
+  "1": { name: "EUA / Canadá", flag: "🇺🇸" },
+  "351": { name: "Portugal", flag: "🇵🇹" },
+  "44": { name: "Reino Unido", flag: "🇬🇧" },
+  "34": { name: "Espanha", flag: "🇪🇸" },
+  "49": { name: "Alemanha", flag: "🇩🇪" },
+  "33": { name: "França", flag: "🇫🇷" },
+  "39": { name: "Itália", flag: "🇮🇹" },
+  "81": { name: "Japão", flag: "🇯🇵" },
+  "82": { name: "Coreia do Sul", flag: "🇰🇷" },
+  "86": { name: "China", flag: "🇨🇳" },
+  "91": { name: "Índia", flag: "🇮🇳" },
+  "62": { name: "Indonésia", flag: "🇮🇩" },
+  "61": { name: "Austrália", flag: "🇦🇺" },
+  "54": { name: "Argentina", flag: "🇦🇷" },
+  "56": { name: "Chile", flag: "🇨🇱" },
+  "57": { name: "Colômbia", flag: "🇨🇴" },
+  "52": { name: "México", flag: "🇲🇽" },
+  "244": { name: "Angola", flag: "🇦🇴" },
+  "258": { name: "Moçambique", flag: "🇲🇿" },
+  "971": { name: "Emirados Árabes", flag: "🇦🇪" },
+  "972": { name: "Israel", flag: "🇮🇱" },
+  "41": { name: "Suíça", flag: "🇨🇭" },
+  "31": { name: "Holanda", flag: "🇳🇱" },
+  "32": { name: "Bélgica", flag: "🇧🇪" },
+  "46": { name: "Suécia", flag: "🇸🇪" },
+  "47": { name: "Noruega", flag: "🇳🇴" },
+  "48": { name: "Polônia", flag: "🇵🇱" },
+  "7": { name: "Rússia", flag: "🇷🇺" },
+};
+
 interface ParsedPhoneInfo {
   raw: string;
   digits: string;
@@ -132,97 +166,57 @@ interface ParsedPhoneInfo {
   ddi: string;
 }
 
-function parseInternationalPhone(input: string): ParsedPhoneInfo {
-  const trimmed = (input || "").trim();
-  const hadPlus = trimmed.startsWith("+");
-  const digits = trimmed.replace(/\D/g, "");
+function parseUniversalPhone(phoneInput: string, explicitDdi?: string): ParsedPhoneInfo {
+  const trimmed = (phoneInput || "").trim();
+  const rawDigits = trimmed.replace(/\D/g, "");
 
-  if (!digits) {
-    return { raw: input, digits: "", fullE164: "", display: "", countryName: "", countryFlag: "", ddi: "" };
+  if (!rawDigits && !explicitDdi) {
+    return { raw: phoneInput, digits: "", fullE164: "", display: "", countryName: "", countryFlag: "", ddi: "" };
   }
 
-  const getCountryMeta = (d: string) => {
-    if (d.startsWith("886")) return { flag: "🇹🇼", name: "Taiwan", ddi: "886" };
-    if (d.startsWith("66")) return { flag: "🇹🇭", name: "Tailândia", ddi: "66" };
-    if (d.startsWith("55")) return { flag: "🇧🇷", name: "Brasil", ddi: "55" };
-    if (d.startsWith("62")) return { flag: "🇮🇩", name: "Indonésia", ddi: "62" };
-    if (d.startsWith("1")) return { flag: "🇺🇸", name: "EUA / Canadá", ddi: "1" };
-    if (d.startsWith("351")) return { flag: "🇵🇹", name: "Portugal", ddi: "351" };
-    if (d.startsWith("34")) return { flag: "🇪🇸", name: "Espanha", ddi: "34" };
-    if (d.startsWith("44")) return { flag: "🇬🇧", name: "Reino Unido", ddi: "44" };
-    if (d.startsWith("49")) return { flag: "🇩🇪", name: "Alemanha", ddi: "49" };
-    if (d.startsWith("33")) return { flag: "🇫🇷", name: "França", ddi: "33" };
-    if (d.startsWith("81")) return { flag: "🇯🇵", name: "Japão", ddi: "81" };
-    if (d.startsWith("82")) return { flag: "🇰🇷", name: "Coreia do Sul", ddi: "82" };
-    if (d.startsWith("86")) return { flag: "🇨🇳", name: "China", ddi: "86" };
-    return { flag: "🌐", name: "Internacional", ddi: "" };
-  };
-
-  // 1. Explicit '+' was typed by user: preserve exact international DDI
-  if (hadPlus) {
-    const meta = getCountryMeta(digits);
+  // 1. Se começou com '+', o usuário digitou o número internacional completo
+  if (trimmed.startsWith("+")) {
+    let ddi = "";
+    let country = { name: "Internacional", flag: "🌐" };
+    for (let len = 4; len >= 1; len--) {
+      const candidate = rawDigits.slice(0, len);
+      if (WORLD_DDI_MAP[candidate]) {
+        ddi = candidate;
+        country = WORLD_DDI_MAP[candidate];
+        break;
+      }
+    }
     return {
-      raw: input,
-      digits,
-      fullE164: digits,
-      display: `+${digits}`,
-      countryName: meta.name,
-      countryFlag: meta.flag,
-      ddi: meta.ddi,
+      raw: phoneInput,
+      digits: rawDigits,
+      fullE164: rawDigits,
+      display: `+${rawDigits}`,
+      countryName: country.name,
+      countryFlag: country.flag,
+      ddi: ddi || rawDigits.slice(0, 3),
     };
   }
 
-  // 2. Starts with a known foreign country code (e.g. 886 for Taiwan, 66 for Thailand)
-  const meta = getCountryMeta(digits);
-  if (meta.ddi && meta.ddi !== "55") {
-    return {
-      raw: input,
-      digits,
-      fullE164: digits,
-      display: `+${digits}`,
-      countryName: meta.name,
-      countryFlag: meta.flag,
-      ddi: meta.ddi,
-    };
-  }
+  // 2. Se um DDI explícito foi informado pelo campo de DDI
+  const ddi = (explicitDdi || "").replace(/\D/g, "");
+  let num = rawDigits;
 
-  // 3. Starts with 55 and length >= 12 (already has Brazil DDI included)
-  if (digits.startsWith("55") && digits.length >= 12) {
-    return {
-      raw: input,
-      digits,
-      fullE164: digits,
-      display: `+${digits}`,
-      countryName: "Brasil",
-      countryFlag: "🇧🇷",
-      ddi: "55",
-    };
+  if (ddi && num.startsWith(ddi)) {
+    num = num.slice(ddi.length);
   }
+  num = num.replace(/^0+/, ""); // Remove zero à esquerda
 
-  // 4. Brazilian local phone: 10 or 11 digits (DDD + número)
-  if (digits.length === 10 || digits.length === 11) {
-    const full = `55${digits}`;
-    return {
-      raw: input,
-      digits,
-      fullE164: full,
-      display: `+55 ${digits.slice(0, 2)} ${digits.slice(2)}`,
-      countryName: "Brasil",
-      countryFlag: "🇧🇷",
-      ddi: "55",
-    };
-  }
+  const full = ddi ? `${ddi}${num}` : num;
+  const country = WORLD_DDI_MAP[ddi] || (ddi ? { name: `País (+${ddi})`, flag: "🌐" } : { name: "Internacional", flag: "🌐" });
 
-  // 5. Fallback for other lengths
-  const isLocalShort = digits.length <= 9;
   return {
-    raw: input,
-    digits,
-    fullE164: isLocalShort ? `55${digits}` : digits,
-    display: `+${isLocalShort ? `55 ${digits}` : digits}`,
-    countryName: isLocalShort ? "Brasil" : "Internacional",
-    countryFlag: isLocalShort ? "🇧🇷" : "🌐",
-    ddi: isLocalShort ? "55" : "",
+    raw: phoneInput,
+    digits: rawDigits,
+    fullE164: full,
+    display: full ? `+${full}` : "",
+    countryName: country.name,
+    countryFlag: country.flag,
+    ddi,
   };
 }
 
@@ -258,6 +252,7 @@ export default function VnTtsStudio() {
   const [dispatchText, setDispatchText] = useState("");
   const [originalUserText, setOriginalUserText] = useState("");
   const [selectedContact, setSelectedContact] = useState(PRESET_CONTACTS[0]);
+  const [customDdi, setCustomDdi] = useState("886");
   const [customPhone, setCustomPhone] = useState("");
   const [recentCustomPhones, setRecentCustomPhones] = useState<string[]>([]);
   const [dispatchMood, setDispatchMood] = useState<string>("sp");
@@ -791,10 +786,15 @@ export default function VnTtsStudio() {
       .then((data) => {
         setBridgeConnected(data.ok && data.connected);
         if (data.primary || data.secondary) {
+          const isPrimaryConn = !!(data.primary?.connected ?? data.connected);
+          const isSecConn = !!data.secondary?.connected;
           setAccountsStatus({
-            primary: data.primary || { connected: data.connected, phone: "5511995685756" },
-            secondary: data.secondary || { connected: false, phone: "6285142001939" },
+            primary: { connected: isPrimaryConn, phone: data.primary?.phone || "5511995685756" },
+            secondary: { connected: isSecConn, phone: data.secondary?.phone || "6285142001939" },
           });
+          if (!isSecConn) {
+            setSelectedWhatsAppAccount("primary");
+          }
         }
       })
       .catch(() => setBridgeConnected(false));
@@ -1219,7 +1219,7 @@ export default function VnTtsStudio() {
   // Execução final do disparo via WhatsApp Bridge
   const executeSendToWhatsApp = async (overrideText?: string) => {
     const textToSend = (overrideText || pendingSendText || dispatchText).trim();
-    const parsedCustom = parseInternationalPhone(customPhone);
+    const parsedCustom = parseUniversalPhone(customPhone, customDdi);
     const targetPhone = selectedContact.id === "outro" ? parsedCustom.fullE164 : selectedContact.phone;
 
     if (!targetPhone) {
@@ -1234,6 +1234,12 @@ export default function VnTtsStudio() {
 
     setIsSendingWhatsApp(true);
     setWhatsappResult(null);
+
+    // Fallback inteligente para evitar envio por conta desconectada
+    const activeAccount =
+      selectedWhatsAppAccount === "secondary" && !accountsStatus.secondary?.connected
+        ? "primary"
+        : selectedWhatsAppAccount;
 
     try {
       let audioBase64: string | undefined = undefined;
@@ -1257,7 +1263,7 @@ export default function VnTtsStudio() {
           text: textToSend,
           audioBase64,
           mood: dispatchMood,
-          account: selectedWhatsAppAccount,
+          account: activeAccount,
           referenceId: VOICE_OPTIONS[selectedVoicePersona].id,
           viewOnce: isViewOnce,
         }),
@@ -1274,7 +1280,7 @@ export default function VnTtsStudio() {
             : `${selectedContact.name} (+${selectedContact.phone})`;
         const senderPhoneDisplay = data.sender
           ? (data.sender.startsWith("+") ? data.sender : `+${data.sender}`)
-          : (selectedWhatsAppAccount === "secondary" ? "+62 851-4200-1939" : "+55 11 99568-5756");
+          : (activeAccount === "secondary" ? "+62 851-4200-1939" : "+55 11 99568-5756");
         const voiceUsedName = VOICE_OPTIONS[selectedVoicePersona].name;
         const viewOnceBadge = isViewOnce ? " (Visualização Única ①)" : "";
         setWhatsappResult({
@@ -1301,7 +1307,7 @@ export default function VnTtsStudio() {
   // Safe Dispatch Countdown: Janela de segurança de 5 segundos para cancelamento prévio
   const handleInitiateSend = (overrideText?: string) => {
     const textToSend = (overrideText || dispatchText).trim();
-    const parsedCustom = parseInternationalPhone(customPhone);
+    const parsedCustom = parseUniversalPhone(customPhone, customDdi);
     const targetPhone = selectedContact.id === "outro" ? parsedCustom.fullE164 : selectedContact.phone;
 
     if (!targetPhone) {
@@ -2217,7 +2223,7 @@ export default function VnTtsStudio() {
     return matchCat && matchSearch;
   });
 
-  const parsedCustomPhone = parseInternationalPhone(customPhone);
+  const parsedCustomPhone = parseUniversalPhone(customPhone, customDdi);
   const formattedCustomPreview = parsedCustomPhone.display;
 
   const targetRecipientLabel =
@@ -2450,7 +2456,14 @@ export default function VnTtsStudio() {
                     {/* Conta 2: Indonésia */}
                     <button
                       type="button"
-                      onClick={() => setSelectedWhatsAppAccount("secondary")}
+                      onClick={() => {
+                        if (!accountsStatus.secondary.connected) {
+                          alert("A Conta 2 (Indonésia) está offline no momento. Seus áudios serão transmitidos pela Conta 1 (Brasil) que está 100% online.");
+                          setSelectedWhatsAppAccount("primary");
+                        } else {
+                          setSelectedWhatsAppAccount("secondary");
+                        }
+                      }}
                       className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
                         selectedWhatsAppAccount === "secondary"
                           ? "bg-white text-black border-white shadow-md font-medium"
@@ -2466,12 +2479,14 @@ export default function VnTtsStudio() {
                         </div>
                       </div>
                       <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono flex items-center space-x-1 shrink-0 ${
-                        selectedWhatsAppAccount === "secondary"
+                        !accountsStatus.secondary.connected
+                          ? "bg-red-500/20 text-red-300 border border-red-500/40"
+                          : selectedWhatsAppAccount === "secondary"
                           ? "bg-emerald-600 text-white font-bold"
                           : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
                       }`}>
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
-                        <span>{accountsStatus.secondary.connected ? "Ativo" : "Online"}</span>
+                        <span className={`w-1.5 h-1.5 rounded-full ${accountsStatus.secondary.connected ? "bg-emerald-300 animate-pulse" : "bg-red-400"}`}></span>
+                        <span>{accountsStatus.secondary.connected ? "Ativo" : "Offline"}</span>
                       </span>
                     </button>
                   </div>
@@ -2658,18 +2673,34 @@ export default function VnTtsStudio() {
               </div>
 
               {selectedContact.id === "outro" && (
-                <div className="p-3.5 rounded-2xl bg-zinc-900/90 border border-emerald-500/30 space-y-2.5 animate-in fade-in duration-200">
+                <div className="p-4 rounded-2xl bg-zinc-900/90 border border-emerald-500/30 space-y-3 animate-in fade-in duration-200">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-medium text-emerald-300 flex items-center space-x-1">
                       <Phone size={12} />
-                      <span>Digitar Outro Número de WhatsApp:</span>
+                      <span>Destino Internacional (Qualquer País do Planeta):</span>
                     </span>
                     <button
                       type="button"
                       onClick={async () => {
                         try {
                           const clip = await navigator.clipboard.readText();
-                          if (clip) setCustomPhone(clip);
+                          if (clip) {
+                            const trimmed = clip.trim();
+                            if (trimmed.startsWith("+")) {
+                              const digits = trimmed.replace(/\D/g, "");
+                              let foundDdi = "";
+                              for (let len = 4; len >= 1; len--) {
+                                const cand = digits.slice(0, len);
+                                if (WORLD_DDI_MAP[cand]) { foundDdi = cand; break; }
+                              }
+                              if (foundDdi) {
+                                setCustomDdi(foundDdi);
+                                setCustomPhone(digits.slice(foundDdi.length));
+                                return;
+                              }
+                            }
+                            setCustomPhone(trimmed);
+                          }
                         } catch (e) {}
                       }}
                       className="text-[10px] text-zinc-400 hover:text-white px-2 py-0.5 rounded-md bg-white/[0.06] hover:bg-white/[0.1] transition cursor-pointer"
@@ -2678,44 +2709,82 @@ export default function VnTtsStudio() {
                     </button>
                   </div>
 
-                  {/* Seletores Rápidos de DDI Internacional */}
+                  {/* Seletores Rápidos de DDI Mundial */}
                   <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 text-[10px]">
                     <span className="text-zinc-500 text-[9px] uppercase font-bold tracking-wider shrink-0 mr-0.5">DDI Rápido:</span>
                     {[
-                      { flag: "🇹🇼", name: "Taiwan", ddi: "+886" },
-                      { flag: "🇧🇷", name: "Brasil", ddi: "+55" },
-                      { flag: "🇹🇭", name: "Tailândia", ddi: "+66" },
-                      { flag: "🇺🇸", name: "EUA", ddi: "+1" },
-                      { flag: "🇵🇹", name: "Portugal", ddi: "+351" },
+                      { flag: "🇹🇼", name: "Taiwan", ddi: "886" },
+                      { flag: "🇧🇷", name: "Brasil", ddi: "55" },
+                      { flag: "🇹🇭", name: "Tailândia", ddi: "66" },
+                      { flag: "🇺🇸", name: "EUA", ddi: "1" },
+                      { flag: "🇵🇹", name: "Portugal", ddi: "351" },
+                      { flag: "🇬🇧", name: "UK", ddi: "44" },
+                      { flag: "🇯🇵", name: "Japão", ddi: "81" },
+                      { flag: "🇦🇴", name: "Angola", ddi: "244" },
                     ].map((item) => (
                       <button
                         key={item.ddi}
                         type="button"
-                        onClick={() => {
-                          const digitsOnly = customPhone.replace(/^\+\d+\s*/, "").replace(/\D/g, "");
-                          setCustomPhone(`${item.ddi} ${digitsOnly}`.trim());
-                        }}
-                        className="px-2 py-1 rounded-lg bg-white/[0.05] hover:bg-white/[0.12] border border-white/10 text-zinc-300 hover:text-white transition shrink-0 flex items-center space-x-1 cursor-pointer"
+                        onClick={() => setCustomDdi(item.ddi)}
+                        className={`px-2 py-1 rounded-lg border transition shrink-0 flex items-center space-x-1 cursor-pointer ${
+                          customDdi === item.ddi
+                            ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-bold"
+                            : "bg-white/[0.05] hover:bg-white/[0.12] border-white/10 text-zinc-300 hover:text-white"
+                        }`}
                       >
                         <span>{item.flag}</span>
-                        <span className="font-mono font-medium">{item.name} ({item.ddi})</span>
+                        <span className="font-mono">{item.name} (+{item.ddi})</span>
                       </button>
                     ))}
                   </div>
 
-                  <div className="relative">
-                    <input
-                      type="tel"
-                      value={customPhone}
-                      onChange={(e) => setCustomPhone(e.target.value)}
-                      placeholder="+886 912 345 678 (Taiwan), +55 11 99999-8888 (Brasil), +66 (Tailândia)..."
-                      className="w-full bg-black/60 border border-white/10 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none transition font-mono"
-                    />
+                  {/* Dual Inputs: DDI Universal + Número do Telefone */}
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    <div className="relative">
+                      <label className="text-[9px] text-zinc-400 block mb-1 font-semibold uppercase">DDI País</label>
+                      <div className="relative flex items-center">
+                        <span className="absolute left-3 text-xs text-emerald-400 font-mono font-bold">+</span>
+                        <input
+                          type="text"
+                          value={customDdi}
+                          onChange={(e) => setCustomDdi(e.target.value.replace(/\D/g, ""))}
+                          placeholder="886"
+                          className="w-full bg-black/60 border border-white/10 focus:border-emerald-500 rounded-xl pl-6 pr-2 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none transition font-mono font-bold text-emerald-400"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="col-span-2 sm:col-span-3">
+                      <label className="text-[9px] text-zinc-400 block mb-1 font-semibold uppercase">Número do WhatsApp (Qualquer Lugar do Mundo)</label>
+                      <input
+                        type="tel"
+                        value={customPhone}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val.trim().startsWith("+")) {
+                            const digits = val.replace(/\D/g, "");
+                            let foundDdi = "";
+                            for (let len = 4; len >= 1; len--) {
+                              const cand = digits.slice(0, len);
+                              if (WORLD_DDI_MAP[cand]) { foundDdi = cand; break; }
+                            }
+                            if (foundDdi) {
+                              setCustomDdi(foundDdi);
+                              setCustomPhone(digits.slice(foundDdi.length));
+                              return;
+                            }
+                          }
+                          setCustomPhone(val);
+                        }}
+                        placeholder="ex: 903 956 136 (Taiwan), 11 99999-8888 (Brasil), etc."
+                        className="w-full bg-black/60 border border-white/10 focus:border-emerald-500 rounded-xl px-3.5 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none transition font-mono"
+                      />
+                    </div>
                   </div>
 
-                  {/* Pré-visualização inteligente do formato internacional com Detecção de País */}
-                  {customPhone && parsedCustomPhone.display && (
-                    <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono px-2.5 py-1.5 rounded-xl bg-black/50 border border-emerald-500/20">
+                  {/* Pré-visualização Universal do Destinatário */}
+                  {parsedCustomPhone.display && (
+                    <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono px-3 py-2 rounded-xl bg-black/50 border border-emerald-500/20">
                       <span className="flex items-center space-x-1.5">
                         <span className="text-sm">{parsedCustomPhone.countryFlag}</span>
                         <span>País detectado: <strong className="text-zinc-200">{parsedCustomPhone.countryName}</strong></span>
@@ -2729,15 +2798,18 @@ export default function VnTtsStudio() {
                   {/* Histórico dos últimos números digitados */}
                   {recentCustomPhones.length > 0 && (
                     <div className="pt-1 border-t border-white/[0.06]">
-                      <span className="text-[10px] text-zinc-500 block mb-1">Números Recentes:</span>
+                      <span className="text-[10px] text-zinc-500 block mb-1">Últimos Números:</span>
                       <div className="flex flex-wrap gap-1.5">
                         {recentCustomPhones.map((ph, idx) => {
-                          const parsedPh = parseInternationalPhone(ph);
+                          const parsedPh = parseUniversalPhone(ph);
                           return (
                             <button
                               key={idx}
                               type="button"
-                              onClick={() => setCustomPhone(parsedPh.display || `+${ph}`)}
+                              onClick={() => {
+                                if (parsedPh.ddi) setCustomDdi(parsedPh.ddi);
+                                setCustomPhone(parsedPh.digits.slice((parsedPh.ddi || "").length));
+                              }}
                               className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-black/40 border border-white/10 text-zinc-400 hover:text-white hover:border-emerald-500/40 transition cursor-pointer flex items-center space-x-1"
                             >
                               <span>{parsedPh.countryFlag}</span>

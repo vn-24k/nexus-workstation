@@ -27,28 +27,21 @@ function resolvePhone(input: string): string {
 
   if (!digits) return "";
 
-  // If user explicitly typed +, preserve full digits without alteration
+  // 1. If user explicitly typed +, trust the full E.164 digits directly for ANY country in the world
   if (hadPlus) return digits;
 
-  // Known foreign DDIs
-  const isForeignDDI =
-    digits.startsWith("886") || // Taiwan
-    digits.startsWith("66")  || // Tailândia
-    digits.startsWith("62")  || // Indonésia
-    digits.startsWith("351") || // Portugal
-    digits.startsWith("1")   || // EUA/Canadá
-    digits.startsWith("44")  || // Reino Unido
-    digits.startsWith("34")  || // Espanha
-    digits.startsWith("49")  || // Alemanha
-    digits.startsWith("33")  || // França
-    digits.startsWith("81")  || // Japão
-    digits.startsWith("82")  || // Coreia do Sul
-    digits.startsWith("86")  || // China
-    digits.startsWith("55");    // Brasil
+  // 2. If 12 or more digits, it is already an international number with DDI
+  if (digits.length >= 12) return digits;
 
-  // Only prefix 55 if Brazilian DDD + number (10 or 11 digits) without DDI
-  if (!isForeignDDI && (digits.length === 10 || digits.length === 11)) {
-    return `55${digits}`;
+  // 3. If already starts with 55
+  if (digits.startsWith("55")) return digits;
+
+  // 4. Only prefix 55 if typical Brazilian local DDD + number (10 or 11 digits, DDD 11-99) without leading 0
+  if ((digits.length === 10 || digits.length === 11) && !digits.startsWith("0")) {
+    const ddd = parseInt(digits.slice(0, 2), 10);
+    if (ddd >= 11 && ddd <= 99) {
+      return `55${digits}`;
+    }
   }
 
   return digits;
