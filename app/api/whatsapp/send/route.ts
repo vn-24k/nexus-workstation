@@ -9,7 +9,8 @@ const DEFAULT_VOICE_REF_ID = "d34eb157e1e7474c98c9c63d79f7ce9a";
 // Contact resolver matching local phone directory & rules
 function resolvePhone(input: string): string {
   if (!input) return "";
-  const lower = input.trim().toLowerCase();
+  const trimmed = input.trim();
+  const lower = trimmed.toLowerCase();
 
   if (lower === "mae" || lower === "mãe" || lower.includes("mãe") || lower.includes("mae")) {
     return "5511976909265";
@@ -21,8 +22,36 @@ function resolvePhone(input: string): string {
     return "5511910765838";
   }
 
-  // Pure digits
-  return input.replace(/\D/g, "");
+  const hadPlus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/g, "");
+
+  if (!digits) return "";
+
+  // If user explicitly typed +, preserve full digits without alteration
+  if (hadPlus) return digits;
+
+  // Known foreign DDIs
+  const isForeignDDI =
+    digits.startsWith("886") || // Taiwan
+    digits.startsWith("66")  || // Tailândia
+    digits.startsWith("62")  || // Indonésia
+    digits.startsWith("351") || // Portugal
+    digits.startsWith("1")   || // EUA/Canadá
+    digits.startsWith("44")  || // Reino Unido
+    digits.startsWith("34")  || // Espanha
+    digits.startsWith("49")  || // Alemanha
+    digits.startsWith("33")  || // França
+    digits.startsWith("81")  || // Japão
+    digits.startsWith("82")  || // Coreia do Sul
+    digits.startsWith("86")  || // China
+    digits.startsWith("55");    // Brasil
+
+  // Only prefix 55 if Brazilian DDD + number (10 or 11 digits) without DDI
+  if (!isForeignDDI && (digits.length === 10 || digits.length === 11)) {
+    return `55${digits}`;
+  }
+
+  return digits;
 }
 
 function getBridgeUrl(custom?: string): string {
@@ -53,7 +82,8 @@ export async function POST(req: NextRequest) {
       bridgeUrl,
       account = "primary",
       voiceId,
-      referenceId
+      referenceId,
+      viewOnce
     } = body;
 
     const targetPhone = resolvePhone(phone);
@@ -87,6 +117,7 @@ export async function POST(req: NextRequest) {
           caption: caption || text || undefined,
           ptv: ptv === true,
           account,
+          viewOnce: viewOnce === true,
         }),
         signal: bridgeController.signal,
       });
@@ -162,6 +193,7 @@ export async function POST(req: NextRequest) {
         audioBase64: audioData,
         ptt: true,
         account,
+        viewOnce: viewOnce === true,
       }),
       signal: bridgeController.signal,
     });

@@ -122,6 +122,110 @@ const STORAGE_KEYS = {
 };
 
 // Preset Contacts
+interface ParsedPhoneInfo {
+  raw: string;
+  digits: string;
+  fullE164: string;
+  display: string;
+  countryName: string;
+  countryFlag: string;
+  ddi: string;
+}
+
+function parseInternationalPhone(input: string): ParsedPhoneInfo {
+  const trimmed = (input || "").trim();
+  const hadPlus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/g, "");
+
+  if (!digits) {
+    return { raw: input, digits: "", fullE164: "", display: "", countryName: "", countryFlag: "", ddi: "" };
+  }
+
+  const getCountryMeta = (d: string) => {
+    if (d.startsWith("886")) return { flag: "🇹🇼", name: "Taiwan", ddi: "886" };
+    if (d.startsWith("66")) return { flag: "🇹🇭", name: "Tailândia", ddi: "66" };
+    if (d.startsWith("55")) return { flag: "🇧🇷", name: "Brasil", ddi: "55" };
+    if (d.startsWith("62")) return { flag: "🇮🇩", name: "Indonésia", ddi: "62" };
+    if (d.startsWith("1")) return { flag: "🇺🇸", name: "EUA / Canadá", ddi: "1" };
+    if (d.startsWith("351")) return { flag: "🇵🇹", name: "Portugal", ddi: "351" };
+    if (d.startsWith("34")) return { flag: "🇪🇸", name: "Espanha", ddi: "34" };
+    if (d.startsWith("44")) return { flag: "🇬🇧", name: "Reino Unido", ddi: "44" };
+    if (d.startsWith("49")) return { flag: "🇩🇪", name: "Alemanha", ddi: "49" };
+    if (d.startsWith("33")) return { flag: "🇫🇷", name: "França", ddi: "33" };
+    if (d.startsWith("81")) return { flag: "🇯🇵", name: "Japão", ddi: "81" };
+    if (d.startsWith("82")) return { flag: "🇰🇷", name: "Coreia do Sul", ddi: "82" };
+    if (d.startsWith("86")) return { flag: "🇨🇳", name: "China", ddi: "86" };
+    return { flag: "🌐", name: "Internacional", ddi: "" };
+  };
+
+  // 1. Explicit '+' was typed by user: preserve exact international DDI
+  if (hadPlus) {
+    const meta = getCountryMeta(digits);
+    return {
+      raw: input,
+      digits,
+      fullE164: digits,
+      display: `+${digits}`,
+      countryName: meta.name,
+      countryFlag: meta.flag,
+      ddi: meta.ddi,
+    };
+  }
+
+  // 2. Starts with a known foreign country code (e.g. 886 for Taiwan, 66 for Thailand)
+  const meta = getCountryMeta(digits);
+  if (meta.ddi && meta.ddi !== "55") {
+    return {
+      raw: input,
+      digits,
+      fullE164: digits,
+      display: `+${digits}`,
+      countryName: meta.name,
+      countryFlag: meta.flag,
+      ddi: meta.ddi,
+    };
+  }
+
+  // 3. Starts with 55 and length >= 12 (already has Brazil DDI included)
+  if (digits.startsWith("55") && digits.length >= 12) {
+    return {
+      raw: input,
+      digits,
+      fullE164: digits,
+      display: `+${digits}`,
+      countryName: "Brasil",
+      countryFlag: "🇧🇷",
+      ddi: "55",
+    };
+  }
+
+  // 4. Brazilian local phone: 10 or 11 digits (DDD + número)
+  if (digits.length === 10 || digits.length === 11) {
+    const full = `55${digits}`;
+    return {
+      raw: input,
+      digits,
+      fullE164: full,
+      display: `+55 ${digits.slice(0, 2)} ${digits.slice(2)}`,
+      countryName: "Brasil",
+      countryFlag: "🇧🇷",
+      ddi: "55",
+    };
+  }
+
+  // 5. Fallback for other lengths
+  const isLocalShort = digits.length <= 9;
+  return {
+    raw: input,
+    digits,
+    fullE164: isLocalShort ? `55${digits}` : digits,
+    display: `+${isLocalShort ? `55 ${digits}` : digits}`,
+    countryName: isLocalShort ? "Brasil" : "Internacional",
+    countryFlag: isLocalShort ? "🇧🇷" : "🌐",
+    ddi: isLocalShort ? "55" : "",
+  };
+}
+
 const PRESET_CONTACTS = [
   { id: "mae", name: "Mãe", phone: "5511976909265", label: "Mãe", icon: "👩‍👦" },
   { id: "tawan", name: "Tawan", phone: "66832024232", label: "Tawan (Namorada)", icon: "💖" },
@@ -164,6 +268,7 @@ export default function VnTtsStudio() {
   const [isPlayingDispatchAudio, setIsPlayingDispatchAudio] = useState(false);
   const dispatchAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [isViewOnce, setIsViewOnce] = useState(false);
   const [whatsappResult, setWhatsappResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [bridgeConnected, setBridgeConnected] = useState<boolean | null>(null);
 
@@ -1114,7 +1219,8 @@ export default function VnTtsStudio() {
   // Execução final do disparo via WhatsApp Bridge
   const executeSendToWhatsApp = async (overrideText?: string) => {
     const textToSend = (overrideText || pendingSendText || dispatchText).trim();
-    const targetPhone = selectedContact.id === "outro" ? customPhone.replace(/\D/g, "") : selectedContact.phone;
+    const parsedCustom = parseInternationalPhone(customPhone);
+    const targetPhone = selectedContact.id === "outro" ? parsedCustom.fullE164 : selectedContact.phone;
 
     if (!targetPhone) {
       alert("Por favor, selecione ou informe o número do WhatsApp de destino.");
@@ -1153,6 +1259,7 @@ export default function VnTtsStudio() {
           mood: dispatchMood,
           account: selectedWhatsAppAccount,
           referenceId: VOICE_OPTIONS[selectedVoicePersona].id,
+          viewOnce: isViewOnce,
         }),
       });
 
@@ -1163,15 +1270,16 @@ export default function VnTtsStudio() {
         }
         const recipientDisplay =
           selectedContact.id === "outro"
-            ? (customPhone || targetPhone)
+            ? (parsedCustom.display ? `${parsedCustom.countryFlag} ${parsedCustom.display}` : `+${targetPhone}`)
             : `${selectedContact.name} (+${selectedContact.phone})`;
         const senderPhoneDisplay = data.sender
           ? (data.sender.startsWith("+") ? data.sender : `+${data.sender}`)
           : (selectedWhatsAppAccount === "secondary" ? "+62 851-4200-1939" : "+55 11 99568-5756");
         const voiceUsedName = VOICE_OPTIONS[selectedVoicePersona].name;
+        const viewOnceBadge = isViewOnce ? " (Visualização Única ①)" : "";
         setWhatsappResult({
           ok: true,
-          message: `Áudio PTT gravado na hora e entregue com sucesso para ${recipientDisplay}! Transmitido pelo WhatsApp (${senderPhoneDisplay}) com a ${voiceUsedName}.`,
+          message: `Áudio PTT gravado na hora${viewOnceBadge} e entregue com sucesso para ${recipientDisplay}! Transmitido pelo WhatsApp (${senderPhoneDisplay}) com a ${voiceUsedName}.`,
         });
       } else {
         setWhatsappResult({
@@ -1193,7 +1301,8 @@ export default function VnTtsStudio() {
   // Safe Dispatch Countdown: Janela de segurança de 5 segundos para cancelamento prévio
   const handleInitiateSend = (overrideText?: string) => {
     const textToSend = (overrideText || dispatchText).trim();
-    const targetPhone = selectedContact.id === "outro" ? customPhone.replace(/\D/g, "") : selectedContact.phone;
+    const parsedCustom = parseInternationalPhone(customPhone);
+    const targetPhone = selectedContact.id === "outro" ? parsedCustom.fullE164 : selectedContact.phone;
 
     if (!targetPhone) {
       alert("Por favor, selecione ou informe o número do WhatsApp de destino.");
@@ -2108,21 +2217,17 @@ export default function VnTtsStudio() {
     return matchCat && matchSearch;
   });
 
-  const cleanCustomDigits = customPhone.replace(/\D/g, "");
-  const formattedCustomPreview = cleanCustomDigits.startsWith("55")
-    ? `+${cleanCustomDigits}`
-    : cleanCustomDigits
-    ? `+55 ${cleanCustomDigits}`
-    : "";
+  const parsedCustomPhone = parseInternationalPhone(customPhone);
+  const formattedCustomPreview = parsedCustomPhone.display;
 
   const targetRecipientLabel =
     selectedContact.id === "outro"
-      ? (formattedCustomPreview || "Outro Número Personalizado")
+      ? (parsedCustomPhone.display ? `${parsedCustomPhone.countryFlag} ${parsedCustomPhone.countryName} (${parsedCustomPhone.display})` : "Outro Número Personalizado")
       : `${selectedContact.name} (${selectedContact.phone.startsWith("55") ? `+55 ${selectedContact.phone.slice(2, 4)} ${selectedContact.phone.slice(4)}` : `+${selectedContact.phone}`})`;
 
   const targetRecipientShortLabel =
     selectedContact.id === "outro"
-      ? (formattedCustomPreview || "Outro Número")
+      ? (parsedCustomPhone.display ? `${parsedCustomPhone.countryFlag} ${parsedCustomPhone.display}` : "Outro Número")
       : selectedContact.name;
 
   // Loading state
@@ -2521,7 +2626,7 @@ export default function VnTtsStudio() {
                 </label>
                 <span className="text-[10px] text-zinc-400 font-mono">
                   {selectedContact.id === "outro"
-                    ? (customPhone ? `Destino: +${customPhone.replace(/\D/g, "")}` : "Informe o número abaixo")
+                    ? (parsedCustomPhone.display ? `Destino: ${parsedCustomPhone.countryFlag} ${parsedCustomPhone.display}` : "Informe o número com DDI")
                     : `Destino: +${selectedContact.phone}`}
                 </span>
               </div>
@@ -2545,7 +2650,7 @@ export default function VnTtsStudio() {
                         <span className="text-xs font-semibold truncate">{c.name}</span>
                       </div>
                       <span className={`text-[9px] mt-1.5 truncate font-mono ${isSelected ? "text-zinc-600" : "text-zinc-500"}`}>
-                        {c.id === "outro" ? (customPhone ? `+${customPhone.replace(/\D/g, "")}` : "Digitar número...") : `+${c.phone}`}
+                        {c.id === "outro" ? (parsedCustomPhone.display ? `${parsedCustomPhone.countryFlag} ${parsedCustomPhone.display}` : "Digitar número...") : `+${c.phone}`}
                       </span>
                     </button>
                   );
@@ -2573,24 +2678,50 @@ export default function VnTtsStudio() {
                     </button>
                   </div>
 
+                  {/* Seletores Rápidos de DDI Internacional */}
+                  <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 text-[10px]">
+                    <span className="text-zinc-500 text-[9px] uppercase font-bold tracking-wider shrink-0 mr-0.5">DDI Rápido:</span>
+                    {[
+                      { flag: "🇹🇼", name: "Taiwan", ddi: "+886" },
+                      { flag: "🇧🇷", name: "Brasil", ddi: "+55" },
+                      { flag: "🇹🇭", name: "Tailândia", ddi: "+66" },
+                      { flag: "🇺🇸", name: "EUA", ddi: "+1" },
+                      { flag: "🇵🇹", name: "Portugal", ddi: "+351" },
+                    ].map((item) => (
+                      <button
+                        key={item.ddi}
+                        type="button"
+                        onClick={() => {
+                          const digitsOnly = customPhone.replace(/^\+\d+\s*/, "").replace(/\D/g, "");
+                          setCustomPhone(`${item.ddi} ${digitsOnly}`.trim());
+                        }}
+                        className="px-2 py-1 rounded-lg bg-white/[0.05] hover:bg-white/[0.12] border border-white/10 text-zinc-300 hover:text-white transition shrink-0 flex items-center space-x-1 cursor-pointer"
+                      >
+                        <span>{item.flag}</span>
+                        <span className="font-mono font-medium">{item.name} ({item.ddi})</span>
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="relative">
                     <input
                       type="tel"
                       value={customPhone}
                       onChange={(e) => setCustomPhone(e.target.value)}
-                      placeholder="DDD + Número (ex: 11 99999-8888 ou +55 11 99999-8888)"
+                      placeholder="+886 912 345 678 (Taiwan), +55 11 99999-8888 (Brasil), +66 (Tailândia)..."
                       className="w-full bg-black/60 border border-white/10 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none transition font-mono"
                     />
                   </div>
 
-                  {/* Pré-visualização do formato internacional */}
-                  {customPhone && (
-                    <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono px-1">
-                      <span>Número formatado:</span>
-                      <span className="text-emerald-400 font-semibold">
-                        +{customPhone.replace(/\D/g, "").startsWith("55")
-                          ? customPhone.replace(/\D/g, "")
-                          : `55${customPhone.replace(/\D/g, "")}`}
+                  {/* Pré-visualização inteligente do formato internacional com Detecção de País */}
+                  {customPhone && parsedCustomPhone.display && (
+                    <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono px-2.5 py-1.5 rounded-xl bg-black/50 border border-emerald-500/20">
+                      <span className="flex items-center space-x-1.5">
+                        <span className="text-sm">{parsedCustomPhone.countryFlag}</span>
+                        <span>País detectado: <strong className="text-zinc-200">{parsedCustomPhone.countryName}</strong></span>
+                      </span>
+                      <span className="text-emerald-400 font-bold font-mono text-xs">
+                        {parsedCustomPhone.display}
                       </span>
                     </div>
                   )}
@@ -2600,16 +2731,20 @@ export default function VnTtsStudio() {
                     <div className="pt-1 border-t border-white/[0.06]">
                       <span className="text-[10px] text-zinc-500 block mb-1">Números Recentes:</span>
                       <div className="flex flex-wrap gap-1.5">
-                        {recentCustomPhones.map((ph, idx) => (
-                          <button
-                            key={idx}
-                            type="button"
-                            onClick={() => setCustomPhone(ph)}
-                            className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-black/40 border border-white/10 text-zinc-400 hover:text-white hover:border-emerald-500/40 transition cursor-pointer"
-                          >
-                            +{ph}
-                          </button>
-                        ))}
+                        {recentCustomPhones.map((ph, idx) => {
+                          const parsedPh = parseInternationalPhone(ph);
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setCustomPhone(parsedPh.display || `+${ph}`)}
+                              className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-black/40 border border-white/10 text-zinc-400 hover:text-white hover:border-emerald-500/40 transition cursor-pointer flex items-center space-x-1"
+                            >
+                              <span>{parsedPh.countryFlag}</span>
+                              <span>{parsedPh.display || `+${ph}`}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -2934,6 +3069,57 @@ export default function VnTtsStudio() {
                 </div>
               )}
 
+              {/* Switch de Visualização Única (WhatsApp View Once Oficial ①) */}
+              <div
+                onClick={() => setIsViewOnce(!isViewOnce)}
+                className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
+                  isViewOnce
+                    ? "bg-amber-950/40 border-amber-500/60 shadow-lg shadow-amber-950/40"
+                    : "bg-zinc-900/60 border-white/[0.08] hover:border-white/20"
+                }`}
+              >
+                <div className="flex items-center space-x-3">
+                  <div
+                    className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition ${
+                      isViewOnce
+                        ? "bg-amber-400 text-black shadow-md shadow-amber-500/50 scale-105"
+                        : "bg-zinc-800 text-zinc-400 border border-white/10"
+                    }`}
+                  >
+                    ①
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-semibold text-white">Visualização Única (View Once)</span>
+                      <span
+                        className={`text-[9px] px-2 py-0.5 rounded-full font-mono font-bold tracking-wider ${
+                          isViewOnce
+                            ? "bg-amber-400/20 text-amber-300 border border-amber-400/40"
+                            : "bg-zinc-800 text-zinc-500 border border-white/5"
+                        }`}
+                      >
+                        {isViewOnce ? "ATIVADO ①" : "DESATIVADO"}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-zinc-400 mt-0.5">
+                      O destinatário só poderá ouvir este áudio uma única vez antes de expirar.
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  className={`w-11 h-6 rounded-full transition-colors p-0.5 relative shrink-0 ${
+                    isViewOnce ? "bg-amber-500" : "bg-zinc-700"
+                  }`}
+                >
+                  <div
+                    className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                      isViewOnce ? "translate-x-5" : "translate-x-0"
+                    } shadow-md`}
+                  />
+                </div>
+              </div>
+
               {/* Action Buttons: Direct Dispatch with Safety Countdown & Preview */}
               <div className="space-y-2.5 pt-1">
                 {sendCountdown !== null ? (
@@ -2942,7 +3128,7 @@ export default function VnTtsStudio() {
                       <div className="flex items-center space-x-2 text-red-200">
                         <Clock size={16} className="text-red-400 animate-spin" />
                         <span className="text-xs font-bold uppercase tracking-wider">
-                          Enviando em {sendCountdown} segundos...
+                          Enviando {isViewOnce ? "(Visualização Única ①)" : ""} em {sendCountdown}s...
                         </span>
                       </div>
                       <span className="text-[11px] bg-red-500/30 border border-red-500/50 text-red-200 px-2.5 py-0.5 rounded-full font-mono font-bold">
@@ -2983,17 +3169,29 @@ export default function VnTtsStudio() {
                     <button
                       onClick={() => handleInitiateSend()}
                       disabled={isSendingWhatsApp || isSynthesizingDispatch || !dispatchText.trim()}
-                      className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center space-x-2.5 transition shadow-xl shadow-emerald-900/30 disabled:opacity-30 active:scale-[0.99] cursor-pointer"
+                      className={`w-full py-3.5 rounded-2xl font-semibold text-xs flex items-center justify-center space-x-2.5 transition shadow-xl disabled:opacity-30 active:scale-[0.99] cursor-pointer ${
+                        isViewOnce
+                          ? "bg-amber-500 hover:bg-amber-400 text-black shadow-amber-900/30"
+                          : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30"
+                      }`}
                     >
                       {isSendingWhatsApp ? (
                         <>
                           <RefreshCw size={14} className="animate-spin" />
-                          <span>Gravando e transmitindo áudio no WhatsApp...</span>
+                          <span>Gravando e transmitindo áudio{isViewOnce ? " de visualização única" : ""} no WhatsApp...</span>
                         </>
                       ) : (
                         <>
-                          <MessageCircle size={15} />
-                          <span>Disparar Áudio para {targetRecipientShortLabel}</span>
+                          {isViewOnce ? (
+                            <span className="w-5 h-5 rounded-full bg-black text-amber-400 font-bold flex items-center justify-center text-xs">①</span>
+                          ) : (
+                            <MessageCircle size={15} />
+                          )}
+                          <span>
+                            {isViewOnce
+                              ? `Disparar Áudio (Visualização Única ①) para ${targetRecipientShortLabel}`
+                              : `Disparar Áudio para ${targetRecipientShortLabel}`}
+                          </span>
                         </>
                       )}
                     </button>
